@@ -231,8 +231,8 @@ that doesn't exist in single-player):
 ```ts
 {
   roundNumber: number,                 // starts at 1, increments every time a round fully concludes (both combat rounds and skip-combat aging-only rounds)
-  playerA: { availableCount: number; resting: { roundsRemaining: number }[] /* no card identity */ },
-  playerB: { availableCount: number; resting: { roundsRemaining: number }[] },
+  playerA: { availableCount: number; resting: { card: Card; roundsRemaining: number }[] },
+  playerB: { availableCount: number; resting: { card: Card; roundsRemaining: number }[] },
   phase: 'selecting' | 'combat' | 'round-summary' | 'game-over',
   combat: {
     attackerSlotsTotal: number,        // how many attacker cards this round (1-3, matches computeSlotCount)
@@ -246,6 +246,18 @@ that doesn't exist in single-player):
   roundEndAppliedBy: { a: boolean; b: boolean },        // has each side durably applied processRoundEnd to its own player_hands for the round currently finishing?
 }
 ```
+
+**Note on `resting` including full `Card` identity (correction made during
+planning):** an earlier draft of this shape said resting only needed
+`roundsRemaining` counts, reasoning that card identities are private. That
+was wrong: resting cards are cards that already **fought and were revealed**
+during a prior round's combat (both a side's own committed soldiers and any
+enemy soldiers it captured) — by the time a card is resting, its identity is
+already public knowledge to both players (it appeared in that round's
+`resolvedDuels`). Omitting identity here would also break the existing
+`RestAreaStrip` UI component, which renders each resting card's actual face
+(`PlayingCard`), not just a countdown. So `resting` carries the full `Card`
+for each entry, exactly like single-player's `RestingCard[]`.
 
 `combat` (including `resolvedDuels`) is **not** cleared/nulled as part of
 the `'round-summary' -> 'selecting'` phase transition — it's deliberately
