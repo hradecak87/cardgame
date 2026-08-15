@@ -1,5 +1,6 @@
 import { addWinnersToRest, ageRestingCards } from './rest'
-import type { Army, Card } from './types'
+import { DIFFICULTY_CONFIG } from './types'
+import type { Army, Card, Difficulty } from './types'
 
 function createCard(id: string, power: number): Card {
   return {
@@ -37,9 +38,25 @@ describe('rest', () => {
     }
 
     const aged = ageRestingCards(army)
-    const updated = addWinnersToRest(aged, [newWinner])
+    const updated = addWinnersToRest(aged, [newWinner], DIFFICULTY_CONFIG.easy.restRounds)
 
     expect(updated.available.map((card) => card.id)).toEqual(['older-resting'])
     expect(updated.resting).toEqual([{ card: newWinner, roundsRemaining: 2 }])
+  })
+
+  test.each<[Difficulty, number]>([
+    ['easy', 2],
+    ['normal', 2],
+    ['expert', 3],
+  ])('addWinnersToRest uses %i rest rounds on %s', (difficulty, expectedRounds) => {
+    const winner = createCard(`winner-${difficulty}`, 6)
+    const army: Army = {
+      available: [winner],
+      resting: [],
+    }
+
+    const updated = addWinnersToRest(army, [winner], DIFFICULTY_CONFIG[difficulty].restRounds)
+
+    expect(updated.resting).toEqual([{ card: winner, roundsRemaining: expectedRounds }])
   })
 })

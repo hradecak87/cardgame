@@ -4,17 +4,111 @@ import { GameBoard } from '@/components/game/GameBoard'
 import { useGameState } from '@/hooks/useGameState'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { computeSlotCount } from '@/lib/game/state'
+import type { Difficulty } from '@/lib/game/types'
+
+const DIFFICULTY_OPTIONS: Array<{
+  value: Difficulty
+  label: string
+  summary: string
+}> = [
+  {
+    value: 'easy',
+    label: 'Easy / Lehká',
+    summary: '2 aces for the player, 2-round rest, one lifetime duel redo.',
+  },
+  {
+    value: 'normal',
+    label: 'Normal / Normální',
+    summary: '1 guaranteed ace, 50% chance for a second, standard 2-round rest.',
+  },
+  {
+    value: 'expert',
+    label: 'Expert / Expertní',
+    summary: 'Only 1 player ace and 3-round rest for captured soldiers.',
+  },
+]
+
+function getDifficultyLabel(difficulty: Difficulty): string {
+  return DIFFICULTY_OPTIONS.find((option) => option.value === difficulty)?.label ?? 'Easy / Lehká'
+}
+
+function DifficultyPicker({
+  selectedDifficulty,
+  onStart,
+  onCancel,
+  showCancel,
+}: {
+  selectedDifficulty: Difficulty
+  onStart: (difficulty: Difficulty) => void
+  onCancel?: () => void
+  showCancel: boolean
+}) {
+  return (
+    <section className="rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(36,49,39,0.98),rgba(20,30,23,0.98))] p-6 text-military-paper shadow-2xl">
+      <p className="text-xs uppercase tracking-[0.35em] text-military-gold">New campaign / Nová hra</p>
+      <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">Choose difficulty / Zvolte obtížnost</h1>
+      <p className="mt-3 text-sm leading-6 text-military-paper/78">
+        Pick the next opponent advantage before the campaign begins.
+      </p>
+
+      <div className="mt-6 grid gap-4">
+        {DIFFICULTY_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onStart(option.value)}
+            className={[
+              'rounded-[1.5rem] border p-5 text-left transition',
+              selectedDifficulty === option.value
+                ? 'border-[#d3b26d] bg-[#d1ac56]/10 shadow-lg'
+                : 'border-military-paper/15 bg-black/15 hover:bg-black/25',
+            ].join(' ')}
+          >
+            <div className="text-lg font-semibold">{option.label}</div>
+            <div className="mt-2 text-sm leading-6 text-military-paper/78">{option.summary}</div>
+          </button>
+        ))}
+      </div>
+
+      {showCancel ? (
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
+          >
+            Keep current game / Nechat současnou hru
+          </button>
+        </div>
+      ) : null}
+    </section>
+  )
+}
 
 export default function HomePage() {
-  const { state, roundResult, actions } = useGameState()
+  const { state, roundResult, selectedDifficulty, isDifficultyPickerOpen, isHydrated, actions } = useGameState()
   const { language, setLanguage, t } = useLanguage()
   const totalCards = state.player.available.length + state.player.resting.length + state.npc.available.length + state.npc.resting.length
 
-  if (totalCards === 0) {
+  if (!isHydrated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
         <div className="rounded-[2rem] border border-[#9b7b3d] bg-black/20 px-6 py-5 text-sm uppercase tracking-[0.28em] text-military-gold">
           {t((messages) => messages.app.preparingBattlefield)}
+        </div>
+      </main>
+    )
+  }
+
+  if (totalCards === 0 && isDifficultyPickerOpen) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
+        <div className="w-full max-w-3xl">
+          <DifficultyPicker
+            selectedDifficulty={selectedDifficulty}
+            onStart={actions.startNewGame}
+            showCancel={false}
+          />
         </div>
       </main>
     )
@@ -79,7 +173,7 @@ export default function HomePage() {
 
           <button
             type="button"
-            onClick={actions.startNewGame}
+            onClick={actions.openDifficultyPicker}
             className="min-h-11 rounded-full border border-military-paper/20 bg-black/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper shadow-lg transition hover:bg-black/40"
           >
             {t((messages) => messages.app.newGame)}
@@ -115,6 +209,7 @@ export default function HomePage() {
         roundLabel={t((messages) => messages.app.roundLabel(state.attackerSide))}
         phaseLabel={t((messages) => messages.app.phaseLabel(state.phase, Boolean(roundResult)))}
         statusMessage={statusMessage}
+        difficultyLabel={getDifficultyLabel(state.difficulty)}
         roundResult={
           roundResult
             ? {
@@ -127,6 +222,9 @@ export default function HomePage() {
         onSelectDefenderCard={actions.selectDefenderCard}
         onConfirmSelection={actions.confirmDefenderSelection}
         onRevealNext={actions.revealNextAttacker}
+        pendingDuelRedo={state.pendingDuelRedo}
+        onRedoPendingDuel={actions.redoPendingDuel}
+        onSkipPendingDuelRedo={actions.skipPendingDuelRedo}
         onDismissRoundResult={actions.dismissRoundResult}
         canRevealNext={
           !roundResult &&
@@ -136,6 +234,19 @@ export default function HomePage() {
           Boolean(combat?.attackerQueue.length)
         }
       />
+
+      {isDifficultyPickerOpen ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-3 py-6 backdrop-blur-sm sm:px-5 lg:px-8">
+          <div className="w-full max-w-3xl">
+            <DifficultyPicker
+              selectedDifficulty={selectedDifficulty}
+              onStart={actions.startNewGame}
+              onCancel={actions.closeDifficultyPicker}
+              showCancel
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

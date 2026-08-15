@@ -1,6 +1,7 @@
 'use client'
 
 import type { Army, Card, GamePhase, ResolvedDuel, Role } from '@/lib/game/types'
+import type { PendingDuelRedo } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { BattleSlots } from './BattleSlots'
 import { PlayerHandSelector } from './PlayerHandSelector'
@@ -19,6 +20,7 @@ interface GameBoardProps {
   revealedCard: Card | null
   defenderPool: Card[]
   resolvedDuels: ResolvedDuel[]
+  pendingDuelRedo?: PendingDuelRedo | null
   selectionAvailableCards: Card[]
   selectionRequiredCount: number
   isDefenderHuman: boolean
@@ -29,10 +31,13 @@ interface GameBoardProps {
   roundLabel?: string
   phaseLabel?: string
   statusMessage?: string
+  difficultyLabel?: string
   roundResult?: RoundResultSummary | null
   onSelectDefenderCard?: (cardId: string) => void
   onConfirmSelection?: (selectedCardIds: string[]) => void
   onRevealNext?: () => void
+  onRedoPendingDuel?: () => void
+  onSkipPendingDuelRedo?: () => void
   onDismissRoundResult?: () => void
   canRevealNext?: boolean
 }
@@ -55,6 +60,7 @@ export function GameBoard({
   revealedCard,
   defenderPool,
   resolvedDuels,
+  pendingDuelRedo = null,
   selectionAvailableCards,
   selectionRequiredCount,
   isDefenderHuman,
@@ -65,10 +71,13 @@ export function GameBoard({
   roundLabel = 'Round 4',
   phaseLabel = 'Combat preview',
   statusMessage = 'The defender answers each revealed attacker one duel at a time.',
+  difficultyLabel = 'Easy / Lehká',
   roundResult = null,
   onSelectDefenderCard,
   onConfirmSelection,
   onRevealNext,
+  onRedoPendingDuel,
+  onSkipPendingDuelRedo,
   onDismissRoundResult,
   canRevealNext = false,
 }: GameBoardProps) {
@@ -101,6 +110,10 @@ export function GameBoard({
                   {t((messages) => messages.board.playerRole)}
                 </div>
                 <div className="mt-1 text-base font-semibold capitalize sm:text-lg">{t((messages) => messages.roles[playerRole])}</div>
+              </div>
+              <div className="rounded-2xl border border-military-paper/10 bg-black/15 px-4 py-3 sm:col-span-2">
+                <div className="text-xs uppercase tracking-[0.25em] text-military-gold">Difficulty / Obtížnost</div>
+                <div className="mt-1 text-base font-semibold sm:text-lg">{difficultyLabel}</div>
               </div>
             </div>
           </div>
@@ -140,8 +153,11 @@ export function GameBoard({
             revealedCard={revealedCard}
             defenderPool={defenderPool}
             resolvedDuels={resolvedDuels}
+            pendingDuelRedo={pendingDuelRedo}
             onSelectDefenderCard={onSelectDefenderCard}
             onRevealNext={onRevealNext}
+            onRedoPendingDuel={onRedoPendingDuel}
+            onSkipPendingDuelRedo={onSkipPendingDuelRedo}
             canRevealNext={canRevealNext}
             isDefenderHuman={isDefenderHuman}
             phase={phase}

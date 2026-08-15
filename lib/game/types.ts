@@ -19,6 +19,14 @@ export interface Army {
   resting: RestingCard[]
 }
 
+export type Difficulty = 'easy' | 'normal' | 'expert'
+
+export const DIFFICULTY_CONFIG: Record<Difficulty, { restRounds: number }> = {
+  easy: { restRounds: 2 },
+  normal: { restRounds: 2 },
+  expert: { restRounds: 3 },
+}
+
 export type Role = 'attacker' | 'defender'
 
 export type Side = 'player' | 'npc'
@@ -31,6 +39,10 @@ export interface Duel {
 export interface ResolvedDuel {
   duel: Duel
   winner: Role
+}
+
+export interface PendingDuelRedo {
+  duel: ResolvedDuel
 }
 
 export interface CombatState {
@@ -46,6 +58,9 @@ export type GamePhase = 'selecting' | 'combat' | 'round-end' | 'game-over'
 export interface GameState {
   player: Army
   npc: Army
+  difficulty: Difficulty
+  duelRedosRemaining: 0 | 1
+  pendingDuelRedo: PendingDuelRedo | null
   attackerSide: Side
   phase: GamePhase
   combat: CombatState | null

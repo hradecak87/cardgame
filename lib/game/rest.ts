@@ -18,9 +18,9 @@ export function ageRestingCards(army: Army): Army {
 }
 
 /**
- * Moves won cards into the rest area for two full future round-end ticks.
+ * Moves won cards into the rest area for the configured number of future round-end ticks.
  */
-export function addWinnersToRest(army: Army, wonCards: Card[]): Army {
+export function addWinnersToRest(army: Army, wonCards: Card[], restRounds: number): Army {
   const wonIds = new Set(wonCards.map((card) => card.id))
 
   return {
@@ -29,7 +29,7 @@ export function addWinnersToRest(army: Army, wonCards: Card[]): Army {
       ...army.resting,
       ...wonCards.map((card) => ({
         card,
-        roundsRemaining: 2,
+        roundsRemaining: restRounds,
       })),
     ],
   }

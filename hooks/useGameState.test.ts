@@ -1,4 +1,14 @@
-import { dismissRoundResult, getAutoAdvanceAction, isValidGameStateShape, loadStoredGameState, prepareRoundResult } from './useGameState'
+import {
+  DEFAULT_SELECTED_DIFFICULTY,
+  dismissRoundResult,
+  getAutoAdvanceAction,
+  hydrateGameSession,
+  isValidGameStateShape,
+  loadStoredDifficulty,
+  loadStoredGameState,
+  prepareRoundResult,
+  startGameWithDifficulty,
+} from './useGameState'
 import type { Army, Card, GameState } from '@/lib/game/types'
 
 function createCard(id: string, power: number): Card {
@@ -22,6 +32,9 @@ function createState(overrides: Partial<GameState> = {}): GameState {
     phase: 'selecting',
     combat: null,
     winner: null,
+    difficulty: 'easy',
+    duelRedosRemaining: 1,
+    pendingDuelRedo: null,
     ...overrides,
   }
 }
@@ -40,6 +53,46 @@ describe('useGameState helpers', () => {
     expect(isValidGameStateShape({ phase: 'combat' })).toBe(false)
     expect(loadStoredGameState('{"broken":')).toBeNull()
     expect(loadStoredGameState(JSON.stringify({ nope: true }))).toBeNull()
+  })
+
+  test('loads a stored difficulty and keeps it ready for the next new game', () => {
+    expect(loadStoredDifficulty('easy')).toBe('easy')
+    expect(loadStoredDifficulty('normal')).toBe('normal')
+    expect(loadStoredDifficulty('expert')).toBe('expert')
+    expect(loadStoredDifficulty('marshal')).toBeNull()
+
+    const hydrated = hydrateGameSession(null, 'expert')
+
+    expect(hydrated.selectedDifficulty).toBe('expert')
+    expect(hydrated.isDifficultyPickerOpen).toBe(true)
+    expect(hydrated.state.player.available).toEqual([])
+    expect(hydrated.state.difficulty).toBe(DEFAULT_SELECTED_DIFFICULTY)
+  })
+
+  test('hydrateGameSession ignores the placeholder state so the difficulty picker still opens before first game', () => {
+    const placeholderState = createState({
+      player: createArmy([]),
+      npc: createArmy([]),
+      difficulty: 'easy',
+      duelRedosRemaining: 1,
+      pendingDuelRedo: null,
+    })
+
+    const hydrated = hydrateGameSession(JSON.stringify(placeholderState), 'normal')
+
+    expect(hydrated.isDifficultyPickerOpen).toBe(true)
+    expect(hydrated.selectedDifficulty).toBe('normal')
+    expect(hydrated.state.player.available).toEqual([])
+    expect(hydrated.state.npc.available).toEqual([])
+  })
+
+  test('starting a game with a chosen difficulty applies that deal distribution', () => {
+    const state = startGameWithDifficulty('expert', () => 0)
+
+    expect(state.difficulty).toBe('expert')
+    expect(state.duelRedosRemaining).toBe(0)
+    expect(state.player.available.filter((card) => card.rank === 'A')).toHaveLength(1)
+    expect(state.npc.available.filter((card) => card.rank === 'A')).toHaveLength(3)
   })
 
   test('identifies when the hook should auto-advance NPC turns', () => {
@@ -198,5 +251,94 @@ describe('useGameState helpers', () => {
       attackerCard.id,
       defenderCard.id,
     ])
+  })
+
+  test('prepareRoundResult uses the game difficulty when sending cards to rest', () => {
+    const attackerCard = createCard('attacker', 8)
+    const defenderCard = createCard('defender', 2)
+    const finishedCombatState = createState({
+      attackerSide: 'player',
+      phase: 'combat',
+      difficulty: 'expert',
+      duelRedosRemaining: 0,
+      player: createArmy([]),
+      npc: createArmy([]),
+      combat: {
+        attackerQueue: [],
+        revealedCard: null,
+        defenderPool: [],
+        pendingTies: [],
+        resolvedDuels: [
+          {
+            duel: {
+              attackerCard,
+              defenderCard,
+            },
+            winner: 'attacker',
+          },
+        ],
+      },
+    })
+
+    const { roundResult } = prepareRoundResult(finishedCombatState)
+
+    expect(roundResult?.nextState.player.resting).toEqual([
+      { card: attackerCard, roundsRemaining: 3 },
+      { card: defenderCard, roundsRemaining: 3 },
+    ])
+  })
+
+  test('auto advance pauses while an easy redo prompt is visible', () => {
+    const attackerCard = createCard('attacker', 8)
+    const defenderCard = createCard('defender', 2)
+    const state = createState({
+      phase: 'combat',
+      combat: {
+        attackerQueue: [],
+        revealedCard: null,
+        defenderPool: [],
+        pendingTies: [],
+        resolvedDuels: [
+          {
+            duel: {
+              attackerCard,
+              defenderCard,
+            },
+            winner: 'attacker',
+          },
+        ],
+      },
+      pendingDuelRedo: {
+        duel: {
+          duel: {
+            attackerCard,
+            defenderCard,
+          },
+          winner: 'attacker',
+        },
+      },
+    })
+
+    expect(getAutoAdvanceAction(state)).toBeNull()
+  })
+
+  test('rejects stored game state with an invalid pending duel redo payload', () => {
+    const invalidRedoState = {
+      ...createState({
+        player: createArmy([createCard('p1', 4)]),
+        npc: createArmy([createCard('n1', 6)]),
+      }),
+      pendingDuelRedo: {
+        duel: {
+          duel: {
+            attackerCard: { id: 'broken' },
+            defenderCard: createCard('d1', 2),
+          },
+          winner: 'attacker',
+        },
+      },
+    }
+
+    expect(loadStoredGameState(JSON.stringify(invalidRedoState))).toBeNull()
   })
 })

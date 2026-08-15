@@ -1,4 +1,4 @@
-import type { Army, Card, Rank, Suit } from './types'
+import type { Army, Card, Difficulty, Rank, Suit } from './types'
 
 const SUITS: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades']
 const RANKS: Rank[] = ['7', '8', '9', '10', 'J', 'Q', 'K', 'A']
@@ -40,21 +40,26 @@ export function createDeck(): Card[] {
 }
 
 /**
- * Shuffles a supplied deck and deals two 16-card starting armies with 2 aces per side.
+ * Shuffles a supplied deck and deals two 16-card starting armies based on the selected difficulty.
  */
-export function dealHands(deck: Card[], rng: () => number = Math.random): { player: Army; npc: Army } {
+export function dealHands(
+  deck: Card[],
+  difficulty: Difficulty,
+  rng: () => number = Math.random,
+): { player: Army; npc: Army } {
   const aces = deck.filter((card) => card.rank === 'A')
   const nonAces = deck.filter((card) => card.rank !== 'A')
-
   const shuffledAces = shuffleCards(aces, rng)
   const shuffledNonAces = shuffleCards(nonAces, rng)
+  const playerAceCount =
+    difficulty === 'easy' ? 2 : difficulty === 'expert' ? 1 : rng() < 0.5 ? 1 : 2
 
   const playerCards = shuffleCards(
-    [...shuffledAces.slice(0, 2), ...shuffledNonAces.slice(0, 14)],
+    [...shuffledAces.slice(0, playerAceCount), ...shuffledNonAces.slice(0, 14)],
     rng,
   )
   const npcCards = shuffleCards(
-    [...shuffledAces.slice(2, 4), ...shuffledNonAces.slice(14, 28)],
+    [...shuffledAces.slice(playerAceCount), ...shuffledNonAces.slice(14, 28)],
     rng,
   )
 

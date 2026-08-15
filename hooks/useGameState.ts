@@ -3,16 +3,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { finalizeCombat, isCombatFinished, revealNextAttacker as revealNextCombatAttacker } from '@/lib/game/combat'
 import { npcSelectAttack } from '@/lib/game/npc'
-import { advanceCombat, beginRound, computeSlotCount, processRoundEnd, startNewGame as createNewGameState } from '@/lib/game/state'
-import type { Army, Card, CombatState, GamePhase, GameState, RestingCard, Side } from '@/lib/game/types'
+import {
+  advanceCombat,
+  beginRound,
+  computeSlotCount,
+  finalizeCombatState,
+  forfeitPendingDuelRedo,
+  processRoundEnd,
+  redoPendingDuel,
+  startNewGame as createNewGameState,
+} from '@/lib/game/state'
+import type {
+  Army,
+  Card,
+  CombatState,
+  Difficulty,
+  GamePhase,
+  GameState,
+  PendingDuelRedo,
+  RestingCard,
+  Side,
+} from '@/lib/game/types'
 
 export const STORAGE_KEY = 'battle-card-game-state'
+export const DIFFICULTY_STORAGE_KEY = 'battle-card-game-difficulty'
+export const DEFAULT_SELECTED_DIFFICULTY: Difficulty = 'easy'
 
 type AutoAdvanceAction =
   | 'begin-npc-selection'
   | 'skip-empty-round'
   | 'reveal-next-attacker'
   | 'resolve-npc-defense'
+  | 'finalize-combat'
   | 'finish-round'
 
 export interface RoundResultState {
@@ -24,10 +46,17 @@ export interface RoundResultState {
 const HYDRATION_PLACEHOLDER_STATE: GameState = {
   player: { available: [], resting: [] },
   npc: { available: [], resting: [] },
+  difficulty: DEFAULT_SELECTED_DIFFICULTY,
+  duelRedosRemaining: 1,
+  pendingDuelRedo: null,
   attackerSide: 'npc',
   phase: 'selecting',
   combat: null,
   winner: null,
+}
+
+function isDifficulty(value: unknown): value is Difficulty {
+  return value === 'easy' || value === 'normal' || value === 'expert'
 }
 
 function isCard(value: unknown): value is Card {
@@ -106,6 +135,44 @@ function isCombatState(value: unknown): value is CombatState {
   )
 }
 
+function isResolvedDuel(value: unknown): boolean {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const candidate = value as {
+    duel?: { attackerCard?: unknown; defenderCard?: unknown }
+    winner?: unknown
+  }
+
+  return (
+    Boolean(candidate.duel) &&
+    typeof candidate.duel === 'object' &&
+    isCard(candidate.duel.attackerCard) &&
+    isCard(candidate.duel.defenderCard) &&
+    (candidate.winner === 'attacker' || candidate.winner === 'defender')
+  )
+}
+
+function isPendingDuelRedo(value: unknown): value is PendingDuelRedo {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  return isResolvedDuel((value as Partial<PendingDuelRedo>).duel)
+}
+
+function isPlaceholderState(state: GameState): boolean {
+  return (
+    state.player.available.length === 0 &&
+    state.player.resting.length === 0 &&
+    state.npc.available.length === 0 &&
+    state.npc.resting.length === 0 &&
+    state.combat === null &&
+    state.phase === 'selecting'
+  )
+}
+
 export function isValidGameStateShape(value: unknown): value is GameState {
   if (!value || typeof value !== 'object') {
     return false
@@ -118,6 +185,9 @@ export function isValidGameStateShape(value: unknown): value is GameState {
   return (
     isArmy(candidate.player) &&
     isArmy(candidate.npc) &&
+    isDifficulty(candidate.difficulty) &&
+    (candidate.duelRedosRemaining === 0 || candidate.duelRedosRemaining === 1) &&
+    (candidate.pendingDuelRedo === null || isPendingDuelRedo(candidate.pendingDuelRedo)) &&
     typeof candidate.phase === 'string' &&
     validPhases.includes(candidate.phase as GamePhase) &&
     typeof candidate.attackerSide === 'string' &&
@@ -137,6 +207,42 @@ export function loadStoredGameState(rawValue: string | null): GameState | null {
     return isValidGameStateShape(parsed) ? parsed : null
   } catch {
     return null
+  }
+}
+
+export function loadStoredDifficulty(rawValue: string | null): Difficulty | null {
+  return isDifficulty(rawValue) ? rawValue : null
+}
+
+export function startGameWithDifficulty(
+  difficulty: Difficulty,
+  rng: () => number = Math.random,
+): GameState {
+  return createNewGameState(difficulty, rng)
+}
+
+export function hydrateGameSession(
+  rawState: string | null,
+  rawDifficulty: string | null,
+): {
+  state: GameState
+  selectedDifficulty: Difficulty
+  isDifficultyPickerOpen: boolean
+} {
+  const storedState = loadStoredGameState(rawState)
+
+  if (storedState && !isPlaceholderState(storedState)) {
+    return {
+      state: storedState,
+      selectedDifficulty: storedState.difficulty,
+      isDifficultyPickerOpen: false,
+    }
+  }
+
+  return {
+    state: HYDRATION_PLACEHOLDER_STATE,
+    selectedDifficulty: loadStoredDifficulty(rawDifficulty) ?? DEFAULT_SELECTED_DIFFICULTY,
+    isDifficultyPickerOpen: true,
   }
 }
 
@@ -177,7 +283,7 @@ function buildRoundResultCards(state: GameState): Pick<RoundResultState, 'captur
 }
 
 export function prepareRoundResult(state: GameState): { displayState: GameState; roundResult: RoundResultState | null } {
-  if (state.phase !== 'combat' || !state.combat) {
+  if (state.phase !== 'combat' || !state.combat || state.pendingDuelRedo) {
     return {
       displayState: state,
       roundResult: null,
@@ -221,6 +327,10 @@ export function getAutoAdvanceAction(
     return null
   }
 
+  if (state.pendingDuelRedo) {
+    return null
+  }
+
   if (state.phase === 'game-over') {
     return null
   }
@@ -242,6 +352,10 @@ export function getAutoAdvanceAction(
   }
 
   if (!state.combat.revealedCard && state.combat.attackerQueue.length === 0) {
+    if (state.combat.pendingTies.length > 0) {
+      return 'finalize-combat'
+    }
+
     return 'finish-round'
   }
 
@@ -275,16 +389,25 @@ function buildNpcDefenderSelection(state: GameState, rng: () => number): string[
 export function useGameState(): {
   state: GameState
   roundResult: RoundResultState | null
+  selectedDifficulty: Difficulty
+  isDifficultyPickerOpen: boolean
+  isHydrated: boolean
   actions: {
-    startNewGame: () => void
+    openDifficultyPicker: () => void
+    closeDifficultyPicker: () => void
+    startNewGame: (difficulty?: Difficulty) => void
     confirmDefenderSelection: (selectedCardIds: string[]) => void
     revealNextAttacker: () => void
     selectDefenderCard: (cardId: string) => void
+    redoPendingDuel: () => void
+    skipPendingDuelRedo: () => void
     dismissRoundResult: () => void
   }
 } {
   const [state, setState] = useState<GameState>(HYDRATION_PLACEHOLDER_STATE)
   const [roundResult, setRoundResult] = useState<RoundResultState | null>(null)
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(DEFAULT_SELECTED_DIFFICULTY)
+  const [isDifficultyPickerOpen, setIsDifficultyPickerOpen] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const timeoutRef = useRef<number | null>(null)
 
@@ -296,15 +419,26 @@ export function useGameState(): {
     setState((currentState) => updater(currentState))
   }, [])
 
-  const startNewGame = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(STORAGE_KEY)
+  const startNewGame = useCallback((difficulty: Difficulty = selectedDifficulty) => {
+    replaceState(startGameWithDifficulty(difficulty))
+    setSelectedDifficulty(difficulty)
+    setRoundResult(null)
+    setIsDifficultyPickerOpen(false)
+    setIsReady(true)
+  }, [replaceState, selectedDifficulty])
+
+  const openDifficultyPicker = useCallback(() => {
+    setSelectedDifficulty(state.difficulty)
+    setIsDifficultyPickerOpen(true)
+  }, [state.difficulty])
+
+  const closeDifficultyPicker = useCallback(() => {
+    if (state.player.available.length + state.player.resting.length + state.npc.available.length + state.npc.resting.length === 0) {
+      return
     }
 
-    replaceState(createNewGameState())
-    setRoundResult(null)
-    setIsReady(true)
-  }, [replaceState])
+    setIsDifficultyPickerOpen(false)
+  }, [state.npc.available.length, state.npc.resting.length, state.player.available.length, state.player.resting.length])
 
   const confirmDefenderSelection = useCallback(
     (selectedCardIds: string[]) => {
@@ -333,6 +467,14 @@ export function useGameState(): {
     [updateState],
   )
 
+  const handleRedoPendingDuel = useCallback(() => {
+    updateState((currentState) => redoPendingDuel(currentState))
+  }, [updateState])
+
+  const handleSkipPendingDuelRedo = useCallback(() => {
+    updateState((currentState) => forfeitPendingDuelRedo(currentState))
+  }, [updateState])
+
   const handleDismissRoundResult = useCallback(() => {
     if (!roundResult) {
       return
@@ -343,8 +485,14 @@ export function useGameState(): {
   }, [replaceState, roundResult])
 
   useEffect(() => {
-    const storedState = loadStoredGameState(window.localStorage.getItem(STORAGE_KEY))
-    replaceState(storedState ?? createNewGameState())
+    const hydratedSession = hydrateGameSession(
+      window.localStorage.getItem(STORAGE_KEY),
+      window.localStorage.getItem(DIFFICULTY_STORAGE_KEY),
+    )
+
+    replaceState(hydratedSession.state)
+    setSelectedDifficulty(hydratedSession.selectedDifficulty)
+    setIsDifficultyPickerOpen(hydratedSession.isDifficultyPickerOpen)
     setRoundResult(null)
     setIsReady(true)
   }, [replaceState])
@@ -355,7 +503,8 @@ export function useGameState(): {
     }
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [isReady, state])
+    window.localStorage.setItem(DIFFICULTY_STORAGE_KEY, selectedDifficulty)
+  }, [isReady, selectedDifficulty, state])
 
   useEffect(() => {
     if (!isReady) {
@@ -394,6 +543,11 @@ export function useGameState(): {
         return
       }
 
+      if (action === 'finalize-combat') {
+        updateState((currentState) => finalizeCombatState(currentState))
+        return
+      }
+
       const { displayState, roundResult: nextRoundResult } = prepareRoundResult(state)
       replaceState(displayState)
       setRoundResult(nextRoundResult)
@@ -410,11 +564,18 @@ export function useGameState(): {
   return {
     state,
     roundResult,
+    selectedDifficulty,
+    isDifficultyPickerOpen,
+    isHydrated: isReady,
     actions: {
+      openDifficultyPicker,
+      closeDifficultyPicker,
       startNewGame,
       confirmDefenderSelection,
       revealNextAttacker,
       selectDefenderCard,
+      redoPendingDuel: handleRedoPendingDuel,
+      skipPendingDuelRedo: handleSkipPendingDuelRedo,
       dismissRoundResult: handleDismissRoundResult,
     },
   }
