@@ -194,8 +194,23 @@ clients at all — rows are only ever created by the `SECURITY DEFINER`
 | `player_uid` | uuid | matches `rooms.player_a_uid` or `player_b_uid` |
 | `available` | jsonb | array of `Card` — this player's unplaced army |
 | `resting` | jsonb | array of `RestingCard` — this player's resting army |
+| `pending_attack_queue` | jsonb, nullable | when this player is attacker this round: the full ordered array of `Card` drawn for the round, including cards not yet revealed to the opponent. `null` when this player isn't the current round's attacker, or between rounds. |
+| `pending_defender_pool` | jsonb, nullable | when this player is defender this round: the full array of `Card` they committed as their defense pool, including cards not yet used to resolve a duel. `null` when this player isn't the current round's defender, or between rounds. |
 
 Primary key: (`room_id`, `player_uid`).
+
+These two `pending_*` columns exist specifically so a client can survive a
+reload **mid-round**: without them, a reloaded client would have lost track
+of exactly which of its own cards were drawn/committed for the in-progress
+round (only `resolvedDuels` in `public_state` would be recoverable, which
+is incomplete for an unfinished round). On reload, a client restores its
+full `CombatState` by combining `public_state.combat` (revealed/resolved
+cards) with its own `pending_attack_queue`/`pending_defender_pool` (its own
+not-yet-revealed cards) — exactly mirroring the existing single-player
+`CombatState` shape (`attackerQueue`, `defenderPool`, `revealedCard`,
+`pendingTies`, `resolvedDuels`) but split across the public/private
+boundary. Both `pending_*` columns are cleared back to `null` as part of
+the `processRoundEnd` write described in Sync Protocol step 6.
 
 `public_state` JSON shape (mirrors the relevant subset of the existing
 `GameState`/`CombatState` types in `lib/game/types.ts`. Note: the existing
@@ -310,6 +325,16 @@ row.
    Realtime subscription. Both clients then separately query their **own**
    `player_hands` row (RLS-restricted to their own `auth.uid()`) to load
    their private army into memory + `localStorage`.
+
+   **Recovery if Player B's client fails/disconnects between setting
+   `status = 'dealing'` and the RPC call completing** (e.g., the browser
+   tab is closed at exactly that moment): the room would otherwise be
+   stuck in `'dealing'` forever. Either client's UI, upon observing
+   `status = 'dealing'` for longer than a short fixed timeout (e.g. 5
+   seconds) without progressing to `'playing'`, simply calls
+   `deal_room(room_id)` itself — safe to do regardless of which client
+   calls it or how many times, thanks to the RPC's idempotency guard
+   described above.
 5. Game proceeds per existing rules; `public_state` is updated after each
    player action (see Sync Protocol).
 6. On win, `status = 'finished'`, `winner` set; both clients show the
@@ -325,12 +350,15 @@ publicly vs. kept private* differs:
    in PvP per existing attacker rule — attacker never freely chooses, cards
    are randomly drawn from their own available pool by their own client;
    the attacker's own client knows these identities immediately, it just
-   didn't get to pick them). Attacker's client writes
-   `combat.attackerSlotsTotal = N` (count only) to `public_state`, bumps
-   `version`.
+   didn't get to pick them). Attacker's client writes the drawn cards to
+   its own `player_hands.pending_attack_queue` (private, full identities)
+   and writes only `combat.attackerSlotsTotal = N` (count) to
+   `public_state`, bumps `version`.
 2. **Defender selects cards** (free choice from their own available pool,
-   as today). Defender's client writes `combat.defenderCommitted = true`
-   to `public_state` (not identities), bumps `version`.
+   as today). Defender's client writes its chosen cards to its own
+   `player_hands.pending_defender_pool` (private, full identities) and
+   writes only `combat.defenderCommitted = true` to `public_state` (not
+   identities), bumps `version`.
 3. Once both are committed, the **attacker's client** (and only the
    attacker's client — see the single-writer-per-step rule in Architecture
    Overview) reveals the next attacker card: it writes that card into
@@ -353,16 +381,26 @@ publicly vs. kept private* differs:
    both clients render the round-result summary locally from
    `resolvedDuels` (same as existing single-player
    `buildRoundResultCards`), each waiting for their own player to click
-   "Continue". Round-end processing (`processRoundEnd`: age resting cards,
-   add winners, swap attacker/defender roles, check win) is only actually
-   applied once **both** players have dismissed (`roundSummaryDismissedBy`
-   is `{a: true, b: true}`) — see Data Model for the exact mechanics. Each
-   client, upon dismissing, updates its own row in `player_hands` to
-   reflect the processed result for its own army; the transition of
-   `public_state.phase` back to `'selecting'` (or `'game-over'`) happens as
-   part of whichever client's write causes both dismissal flags to become
-   true (idempotent either way, since both compute the same result from
-   the same prior state).
+   "Continue". Clicking "Continue" **only** sets that player's own flag
+   (`roundSummaryDismissedBy.a = true` or `.b = true`) in `public_state` —
+   it does **not** touch `player_hands` yet, and it does not compute
+   `processRoundEnd` yet. Each client, via its Realtime subscription, is
+   watching for the moment `roundSummaryDismissedBy` becomes `{a: true, b:
+   true}` (this can be observed by either client, regardless of which
+   client's dismiss-write was the second/deciding one). The moment a client
+   observes both flags true, it computes `processRoundEnd` **for its own
+   side only** and writes the result to its **own** `player_hands` row
+   (clearing `pending_attack_queue`/`pending_defender_pool`, updating
+   `available`/`resting`) — each client can only ever write its own
+   `player_hands` row per RLS, so this step is inherently duplicated once
+   per client, which is correct and required (not a race to avoid). Only
+   one of the two clients' writes to `public_state` (updating counts,
+   `attacker_side` swap, phase back to `'selecting'`/`'game-over'`, and
+   resetting `roundSummaryDismissedBy` to `{a: false, b: false}`) actually
+   succeeds under the normal optimistic-concurrency guard; the other
+   client's equivalent write simply fails its version check and is
+   discarded (harmless no-op, since both computed the identical result from
+   the identical prior state).
 7. If `determineWinner` finds a winner, room `status` and `winner` are set.
 
 Any write uses the optimistic-concurrency guard (`WHERE version = expected`).
