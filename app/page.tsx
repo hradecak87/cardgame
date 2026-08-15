@@ -1,6 +1,8 @@
 'use client'
 
+import { ActionHighlight } from '@/components/game/ActionHighlight'
 import { GameBoard } from '@/components/game/GameBoard'
+import { getActivePlayerAction } from '@/components/game/activePlayerAction'
 import { useGameState } from '@/hooks/useGameState'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { computeSlotCount } from '@/lib/game/state'
@@ -37,51 +39,58 @@ function DifficultyPicker({
   onStart,
   onCancel,
   showCancel,
+  highlighted = false,
 }: {
   selectedDifficulty: Difficulty
   onStart: (difficulty: Difficulty) => void
   onCancel?: () => void
   showCancel: boolean
+  highlighted?: boolean
 }) {
   return (
-    <section className="rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(36,49,39,0.98),rgba(20,30,23,0.98))] p-6 text-military-paper shadow-2xl">
-      <p className="text-xs uppercase tracking-[0.35em] text-military-gold">New campaign / Nová hra</p>
-      <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">Choose difficulty / Zvolte obtížnost</h1>
-      <p className="mt-3 text-sm leading-6 text-military-paper/78">
-        Pick the next opponent advantage before the campaign begins.
-      </p>
+    <ActionHighlight
+      active={highlighted}
+      className="max-w-full overflow-hidden rounded-[2rem] border border-[#9b7b3d]"
+    >
+      <section className="max-w-full bg-[linear-gradient(180deg,rgba(36,49,39,0.98),rgba(20,30,23,0.98))] p-6 text-military-paper shadow-2xl">
+        <p className="text-xs uppercase tracking-[0.35em] text-military-gold">New campaign / Nová hra</p>
+        <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">Choose difficulty / Zvolte obtížnost</h1>
+        <p className="mt-3 text-sm leading-6 text-military-paper/78">
+          Pick the next opponent advantage before the campaign begins.
+        </p>
 
-      <div className="mt-6 grid gap-4">
-        {DIFFICULTY_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onStart(option.value)}
-            className={[
-              'rounded-[1.5rem] border p-5 text-left transition',
-              selectedDifficulty === option.value
-                ? 'border-[#d3b26d] bg-[#d1ac56]/10 shadow-lg'
-                : 'border-military-paper/15 bg-black/15 hover:bg-black/25',
-            ].join(' ')}
-          >
-            <div className="text-lg font-semibold">{option.label}</div>
-            <div className="mt-2 text-sm leading-6 text-military-paper/78">{option.summary}</div>
-          </button>
-        ))}
-      </div>
-
-      {showCancel ? (
-        <div className="mt-6 flex justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
-          >
-            Keep current game / Nechat současnou hru
-          </button>
+        <div className="mt-6 grid gap-4">
+          {DIFFICULTY_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onStart(option.value)}
+              className={[
+                'rounded-[1.5rem] border p-5 text-left transition',
+                selectedDifficulty === option.value
+                  ? 'border-[#d3b26d] bg-[#d1ac56]/10 shadow-lg'
+                  : 'border-military-paper/15 bg-black/15 hover:bg-black/25',
+              ].join(' ')}
+            >
+              <div className="text-lg font-semibold">{option.label}</div>
+              <div className="mt-2 text-sm leading-6 text-military-paper/78">{option.summary}</div>
+            </button>
+          ))}
         </div>
-      ) : null}
-    </section>
+
+        {showCancel ? (
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
+            >
+              Keep current game / Nechat současnou hru
+            </button>
+          </div>
+        ) : null}
+      </section>
+    </ActionHighlight>
   )
 }
 
@@ -89,6 +98,26 @@ export default function HomePage() {
   const { state, roundResult, selectedDifficulty, isDifficultyPickerOpen, isHydrated, actions } = useGameState()
   const { language, setLanguage, t } = useLanguage()
   const totalCards = state.player.available.length + state.player.resting.length + state.npc.available.length + state.npc.resting.length
+  const playerRole = state.attackerSide === 'player' ? 'attacker' : 'defender'
+  const isDefenderHuman = state.attackerSide === 'npc'
+  const selectionRequiredCount = state.phase === 'selecting' ? computeSlotCount(state) : 0
+  const combat = state.combat
+  const canRevealNext =
+    !roundResult &&
+    state.phase === 'combat' &&
+    isDefenderHuman &&
+    !combat?.revealedCard &&
+    Boolean(combat?.attackerQueue.length)
+  const activePlayerAction = getActivePlayerAction({
+    isDifficultyPickerOpen,
+    roundResultVisible: Boolean(roundResult),
+    pendingDuelRedoVisible: Boolean(state.pendingDuelRedo),
+    phase: state.phase,
+    isDefenderHuman,
+    selectionRequiredCount,
+    hasRevealedCard: Boolean(combat?.revealedCard),
+    canRevealNext,
+  })
 
   if (!isHydrated) {
     return (
@@ -108,16 +137,13 @@ export default function HomePage() {
             selectedDifficulty={selectedDifficulty}
             onStart={actions.startNewGame}
             showCancel={false}
+            highlighted={activePlayerAction === 'difficulty-picker'}
           />
         </div>
       </main>
     )
   }
 
-  const playerRole = state.attackerSide === 'player' ? 'attacker' : 'defender'
-  const isDefenderHuman = state.attackerSide === 'npc'
-  const selectionRequiredCount = state.phase === 'selecting' ? computeSlotCount(state) : 0
-  const combat = state.combat
   const statusMessage =
     roundResult
       ? t((messages) => messages.app.status.roundResult)
@@ -181,14 +207,19 @@ export default function HomePage() {
         </div>
 
         {state.phase === 'game-over' ? (
-          <section className="rounded-[1.5rem] border border-[#d3b26d] bg-[#f0e2ba]/95 px-5 py-4 text-[#2d2414] shadow-xl">
-            <p className="text-xs font-bold uppercase tracking-[0.28em] text-[#7a5c22]">{t((messages) => messages.app.gameOver)}</p>
-            <h2 className="mt-1 text-xl font-semibold sm:text-2xl">
-              {state.winner === 'player'
-                ? t((messages) => messages.app.playerWinsCampaign)
-                : t((messages) => messages.app.npcWinsCampaign)}
-            </h2>
-          </section>
+          <ActionHighlight
+            active={activePlayerAction === 'game-over'}
+            className="rounded-[1.5rem] border border-[#d3b26d]"
+          >
+            <section className="bg-[#f0e2ba]/95 px-5 py-4 text-[#2d2414] shadow-xl">
+              <p className="text-xs font-bold uppercase tracking-[0.28em] text-[#7a5c22]">{t((messages) => messages.app.gameOver)}</p>
+              <h2 className="mt-1 text-xl font-semibold sm:text-2xl">
+                {state.winner === 'player'
+                  ? t((messages) => messages.app.playerWinsCampaign)
+                  : t((messages) => messages.app.npcWinsCampaign)}
+              </h2>
+            </section>
+          </ActionHighlight>
         ) : null}
       </div>
 
@@ -226,13 +257,12 @@ export default function HomePage() {
         onRedoPendingDuel={actions.redoPendingDuel}
         onSkipPendingDuelRedo={actions.skipPendingDuelRedo}
         onDismissRoundResult={actions.dismissRoundResult}
-        canRevealNext={
-          !roundResult &&
-          state.phase === 'combat' &&
-          isDefenderHuman &&
-          !combat?.revealedCard &&
-          Boolean(combat?.attackerQueue.length)
-        }
+        canRevealNext={canRevealNext}
+        highlightPlayerHandSelector={activePlayerAction === 'player-hand-selector'}
+        highlightDefenderPool={activePlayerAction === 'defender-pool'}
+        highlightRevealNext={activePlayerAction === 'reveal-next'}
+        highlightPendingDuelRedo={activePlayerAction === 'pending-duel-redo'}
+        highlightRoundResult={activePlayerAction === 'round-result'}
       />
 
       {isDifficultyPickerOpen ? (
@@ -243,6 +273,7 @@ export default function HomePage() {
               onStart={actions.startNewGame}
               onCancel={actions.closeDifficultyPicker}
               showCancel
+              highlighted={activePlayerAction === 'difficulty-picker'}
             />
           </div>
         </div>

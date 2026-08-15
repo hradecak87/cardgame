@@ -4,18 +4,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { Card } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { ActionHighlight } from './ActionHighlight'
 import { PlayingCard } from './PlayingCard'
 
 interface PlayerHandSelectorProps {
   availableCards: Card[]
   requiredCount: number
   onConfirm: (selectedCardIds: string[]) => void
+  highlighted?: boolean
 }
 
 export function PlayerHandSelector({
   availableCards,
   requiredCount,
   onConfirm,
+  highlighted = false,
 }: PlayerHandSelectorProps) {
   const { t } = useLanguage()
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
@@ -48,7 +51,11 @@ export function PlayerHandSelector({
   const canConfirm = selectedCardIds.length === requiredCount && requiredCount > 0
 
   return (
-    <section className="rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(239,230,207,0.08),rgba(0,0,0,0.12))] p-4 sm:p-5">
+    <ActionHighlight
+      active={highlighted}
+      className="max-w-full overflow-hidden rounded-[2rem] border border-[#9b7b3d]"
+    >
+      <section className="max-w-full bg-[linear-gradient(180deg,rgba(239,230,207,0.08),rgba(0,0,0,0.12))] p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-military-gold">
@@ -93,6 +100,7 @@ export function PlayerHandSelector({
           {t((messages) => messages.selector.confirmDefenders)}
         </button>
       </div>
-    </section>
+      </section>
+    </ActionHighlight>
   )
 }

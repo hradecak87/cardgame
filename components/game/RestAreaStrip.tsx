@@ -13,7 +13,7 @@ interface RestAreaStripProps {
 export function RestAreaStrip({ restingCards, label }: RestAreaStripProps) {
   const { t } = useLanguage()
   return (
-    <section className="rounded-3xl border border-[#927238]/50 bg-black/10 p-3 sm:p-4">
+    <section className="max-w-full overflow-hidden rounded-3xl border border-[#927238]/50 bg-black/10 p-3 sm:p-4">
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-sm font-semibold uppercase tracking-[0.24em] text-military-paper/90">
           {label}
@@ -28,17 +28,17 @@ export function RestAreaStrip({ restingCards, label }: RestAreaStripProps) {
           {t((messages) => messages.restArea.empty)}
         </div>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-1">
+        <div className="flex max-w-full flex-wrap gap-3">
           {restingCards.map((restingCard) => (
             <motion.div
               key={restingCard.card.id}
               layout
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="relative shrink-0 pt-3"
+              className="relative pt-3"
             >
               <PlayingCard card={restingCard.card} size="sm" />
-              <div className="absolute right-0 top-0 rounded-full border border-[#c9aa67] bg-[#f7ecd1] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#594418] shadow">
+              <div className="absolute left-1/2 top-0 max-w-full -translate-x-1/2 rounded-full border border-[#c9aa67] bg-[#f7ecd1] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#594418] shadow">
                 {t((messages) => messages.restArea.roundsRemaining(restingCard.roundsRemaining))}
               </div>
             </motion.div>
