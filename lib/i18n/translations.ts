@@ -111,6 +111,7 @@ export interface Translations {
     mainMenu: {
       singlePlayer: string
       multiplayerOnline: string
+      multiplayerJoin: string
     }
     createRoom: {
       heading: string
@@ -282,7 +283,8 @@ const en: Translations = {
   multiplayer: {
     mainMenu: {
       singlePlayer: 'Play vs computer',
-      multiplayerOnline: 'Play online with a friend',
+      multiplayerOnline: 'Create a room online',
+      multiplayerJoin: 'Join a room with a code',
     },
     createRoom: {
       heading: 'Create a room',
@@ -452,7 +454,8 @@ const cs: Translations = {
   multiplayer: {
     mainMenu: {
       singlePlayer: 'Hrát proti počítači',
-      multiplayerOnline: 'Hrát s kamarádem online',
+      multiplayerOnline: 'Založit online místnost',
+      multiplayerJoin: 'Připojit se kódem',
     },
     createRoom: {
       heading: 'Vytvoř místnost',

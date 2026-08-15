@@ -5,9 +5,10 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 interface MainMenuProps {
   onSelectSinglePlayer: () => void
   onSelectMultiplayer: () => void
+  onSelectJoinRoom: () => void
 }
 
-export function MainMenu({ onSelectSinglePlayer, onSelectMultiplayer }: MainMenuProps) {
+export function MainMenu({ onSelectSinglePlayer, onSelectMultiplayer, onSelectJoinRoom }: MainMenuProps) {
   const { t } = useLanguage()
 
   return (
@@ -29,6 +30,13 @@ export function MainMenu({ onSelectSinglePlayer, onSelectMultiplayer }: MainMenu
           className="rounded-[1.5rem] border border-military-paper/15 bg-black/15 p-5 text-left transition hover:bg-black/25"
         >
           <div className="text-lg font-semibold">{t((msg) => msg.multiplayer.mainMenu.multiplayerOnline)}</div>
+        </button>
+        <button
+          type="button"
+          onClick={onSelectJoinRoom}
+          className="rounded-[1.5rem] border border-military-paper/15 bg-black/15 p-5 text-left transition hover:bg-black/25"
+        >
+          <div className="text-lg font-semibold">{t((msg) => msg.multiplayer.mainMenu.multiplayerJoin)}</div>
         </button>
       </div>
     </section>

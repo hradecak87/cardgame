@@ -153,6 +153,7 @@ export default function HomePage() {
           <MainMenu
             onSelectSinglePlayer={() => setGameMode('single-player')}
             onSelectMultiplayer={() => setGameMode('multiplayer-create')}
+            onSelectJoinRoom={() => setGameMode('multiplayer-join')}
           />
         </div>
       </main>

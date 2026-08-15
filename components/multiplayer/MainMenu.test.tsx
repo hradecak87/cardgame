@@ -8,48 +8,54 @@ import userEvent from '@testing-library/user-event'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { MainMenu } from './MainMenu'
 
-describe('MainMenu', () => {
-  it('renders both game mode buttons', () => {
-    const onSelectSinglePlayer = jest.fn()
-    const onSelectMultiplayer = jest.fn()
+function renderMainMenu(overrides?: Partial<React.ComponentProps<typeof MainMenu>>) {
+  const onSelectSinglePlayer = jest.fn()
+  const onSelectMultiplayer = jest.fn()
+  const onSelectJoinRoom = jest.fn()
 
-    render(
-      <LanguageProvider>
-        <MainMenu onSelectSinglePlayer={onSelectSinglePlayer} onSelectMultiplayer={onSelectMultiplayer} />
-      </LanguageProvider>,
-    )
+  render(
+    <LanguageProvider>
+      <MainMenu
+        onSelectSinglePlayer={overrides?.onSelectSinglePlayer ?? onSelectSinglePlayer}
+        onSelectMultiplayer={overrides?.onSelectMultiplayer ?? onSelectMultiplayer}
+        onSelectJoinRoom={overrides?.onSelectJoinRoom ?? onSelectJoinRoom}
+      />
+    </LanguageProvider>,
+  )
+
+  return { onSelectSinglePlayer, onSelectMultiplayer, onSelectJoinRoom }
+}
+
+describe('MainMenu', () => {
+  it('renders all three game mode buttons', () => {
+    renderMainMenu()
 
     expect(screen.getByRole('button', { name: /play vs computer/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /play online/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create a room online/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /join a room with a code/i })).toBeInTheDocument()
   })
 
   it('calls onSelectSinglePlayer when single player button is clicked', async () => {
-    const onSelectSinglePlayer = jest.fn()
-    const onSelectMultiplayer = jest.fn()
     const user = userEvent.setup()
-
-    render(
-      <LanguageProvider>
-        <MainMenu onSelectSinglePlayer={onSelectSinglePlayer} onSelectMultiplayer={onSelectMultiplayer} />
-      </LanguageProvider>,
-    )
+    const { onSelectSinglePlayer } = renderMainMenu()
 
     await user.click(screen.getByRole('button', { name: /play vs computer/i }))
     expect(onSelectSinglePlayer).toHaveBeenCalled()
   })
 
-  it('calls onSelectMultiplayer when multiplayer button is clicked', async () => {
-    const onSelectSinglePlayer = jest.fn()
-    const onSelectMultiplayer = jest.fn()
+  it('calls onSelectMultiplayer when create-room button is clicked', async () => {
     const user = userEvent.setup()
+    const { onSelectMultiplayer } = renderMainMenu()
 
-    render(
-      <LanguageProvider>
-        <MainMenu onSelectSinglePlayer={onSelectSinglePlayer} onSelectMultiplayer={onSelectMultiplayer} />
-      </LanguageProvider>,
-    )
-
-    await user.click(screen.getByRole('button', { name: /play online/i }))
+    await user.click(screen.getByRole('button', { name: /create a room online/i }))
     expect(onSelectMultiplayer).toHaveBeenCalled()
+  })
+
+  it('calls onSelectJoinRoom when join-room button is clicked', async () => {
+    const user = userEvent.setup()
+    const { onSelectJoinRoom } = renderMainMenu()
+
+    await user.click(screen.getByRole('button', { name: /join a room with a code/i }))
+    expect(onSelectJoinRoom).toHaveBeenCalled()
   })
 })
