@@ -16,7 +16,15 @@ function placeholderCards(count: number, slotLabel: string): Card[] {
 }
 
 function buildOpponentArmy(publicState: PublicState, opponentSlot: PlayerSlot): Army {
-  const opponentPublic = opponentSlot === 'a' ? publicState.playerA : publicState.playerB
+  // Defensive fallback: public_state is a single JSONB column overwritten
+  // wholesale on every write, so a bug in any writer that forgets to spread
+  // the previous state could otherwise drop playerA/playerB entirely and
+  // crash every client's render. Missing data degrades to "empty" instead
+  // of throwing.
+  const opponentPublic = (opponentSlot === 'a' ? publicState.playerA : publicState.playerB) ?? {
+    availableCount: 0,
+    resting: [],
+  }
 
   return {
     available: placeholderCards(opponentPublic.availableCount, opponentSlot),

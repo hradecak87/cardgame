@@ -348,16 +348,7 @@ export function useMultiplayerGameState(): {
 
         // Add winners to rest
         if (publicState.combat && publicState.combat.resolvedDuels.length > 0) {
-          const attackerSide = roomData.attacker_side
-          const currentAttackerSide = publicState.combat.resolvedDuels[0]
-            ? publicState.combat.resolvedDuels[0].winner === 'attacker'
-              ? attackerSide
-              : attackerSide === 'a'
-                ? 'b'
-                : 'a'
-            : null
-
-          const isAttacker = ownSlot === currentAttackerSide
+          const isAttacker = ownSlot === roomData.attacker_side
           const victoriousDuels = publicState.combat.resolvedDuels.filter(
             (entry) => (isAttacker && entry.winner === 'attacker') || (!isAttacker && entry.winner === 'defender'),
           )
@@ -554,6 +545,7 @@ export function useMultiplayerGameState(): {
         const newPhase = newStatus === 'finished' ? 'game-over' : 'selecting'
 
         const updates: Partial<PublicState> = {
+          ...publicState,
           roundNumber: publicState.roundNumber + 1,
           phase: newPhase,
           combat: null,
@@ -584,7 +576,9 @@ export function useMultiplayerGameState(): {
     }
 
     reconcileTimeoutRef.current = setTimeout(() => {
-      reconcile()
+      reconcile().catch((error) => {
+        console.error('Unhandled error in reconciliation effect:', error)
+      })
     }, 100)
 
     return () => {
