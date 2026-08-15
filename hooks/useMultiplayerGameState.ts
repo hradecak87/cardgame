@@ -170,12 +170,15 @@ export function useMultiplayerGameState(): {
           }
         }
 
-        // Fetch own hand
+        // Fetch own hand. This can legitimately be null at this point: the
+        // player_hands row is only created by the deal_room() RPC once both
+        // seats are filled, so a freshly created ('waiting') or just-joined
+        // ('dealing', before deal_room() has run) room has no hand yet.
+        // We must still register the room/subscribe so the UI can show the
+        // waiting/room-code screen and so realtime updates (status flipping
+        // to 'dealing'/'playing', and the hand becoming available) are
+        // received — bailing out here would silently strand the client.
         const hand = await fetchPlayerHand(roomData.id, playerUid)
-        if (!hand) {
-          console.error('Could not fetch player hand')
-          return
-        }
 
         // Update room state
         updateRoom({
