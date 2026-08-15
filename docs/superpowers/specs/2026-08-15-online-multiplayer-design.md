@@ -159,7 +159,7 @@ New Supabase Postgres table, `rooms`:
 | `id` | uuid, PK | internal id |
 | `code` | text, unique | the 5-digit numeric room code shown/shared, e.g. `"48213"` |
 | `version` | integer | optimistic concurrency counter, starts at 0 |
-| `status` | text | `waiting` \| `playing` \| `finished` |
+| `status` | text | `waiting` \| `dealing` \| `playing` \| `finished` |
 | `created_at` | timestamptz | for cleanup of stale rooms (future housekeeping, not implemented now) |
 | `player_a_nickname` | text, nullable | set when room is created |
 | `player_b_nickname` | text, nullable | set when second player joins |
@@ -169,10 +169,24 @@ New Supabase Postgres table, `rooms`:
 | `public_state` | jsonb | see shape below |
 | `winner` | text, nullable | `'a'` \| `'b'` \| null |
 
+**RLS policies on `rooms`** (this table holds no private card data, so
+policies only need to prevent unauthorized *writes*, not reads):
+- `SELECT`: allowed for any anon session (needed so an unauthenticated
+  browser can look up a room by `code` before it has joined).
+- `INSERT`: allowed for any anon session (room creation).
+- `UPDATE`: allowed only when
+  `auth.uid() IN (player_a_uid, player_b_uid) OR player_b_uid IS NULL` —
+  the `player_b_uid IS NULL` clause is what permits the join step (an
+  as-yet-unrecognized second player claiming the open seat); once both
+  seats are filled, only the two recognized participants may update the
+  row.
+
 Second table, `player_hands` — one row per player per room, holding the
-**private** data. Protected by Row Level Security: `SELECT`/`UPDATE` allowed
-only where `auth.uid() = player_uid`, so a player's own client can query
-its own row but never the opponent's.
+**private** data. Protected by Row Level Security: `SELECT`/`UPDATE`
+allowed only where `auth.uid() = player_uid`, so a player's own client can
+query its own row but never the opponent's. `INSERT` is not exposed to
+clients at all — rows are only ever created by the `SECURITY DEFINER`
+`deal_room` function (see below), which bypasses RLS by design.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -184,16 +198,25 @@ its own row but never the opponent's.
 Primary key: (`room_id`, `player_uid`).
 
 `public_state` JSON shape (mirrors the relevant subset of the existing
-`GameState`/`CombatState` types in `lib/game/types.ts`, using the same
-`GamePhase` values — including `'round-end'`, matching the existing enum
-exactly — and including enough combat detail to fully reconstruct an
-in-progress round after a reload, not just counts):
+`GameState`/`CombatState` types in `lib/game/types.ts`. Note: the existing
+`GamePhase` type includes a `'round-end'` value, but the current
+single-player code never actually sets it — `lib/game/state.ts` only ever
+transitions between `'selecting'`, `'combat'`, and `'game-over'`; the
+"round result summary" screen is a purely client-side/hook-level overlay
+computed in `hooks/useGameState.ts` from a finished-but-not-yet-processed
+`combat` state, not a distinct `GameState.phase` value. Multiplayer,
+however, has two independent viewers who must each explicitly dismiss the
+summary before the round actually advances (so one player dismissing
+doesn't yank the summary away from the other) — so `public_state.phase`
+introduces one **new** value not present in the single-player enum,
+`'round-summary'`, to represent this a two-viewer synchronization need
+that doesn't exist in single-player):
 
 ```ts
 {
   playerA: { availableCount: number; resting: { roundsRemaining: number }[] /* no card identity */ },
   playerB: { availableCount: number; resting: { roundsRemaining: number }[] },
-  phase: 'selecting' | 'combat' | 'round-end' | 'game-over', // matches lib/game/types.ts GamePhase exactly
+  phase: 'selecting' | 'combat' | 'round-summary' | 'game-over',
   combat: {
     attackerSlotsTotal: number,        // how many attacker cards this round (2 or 3)
     attackerCardsRevealed: Card[],     // full Card objects, public once revealed, in reveal order
@@ -202,8 +225,26 @@ in-progress round after a reload, not just counts):
     pendingTies: Duel[],               // mirrors CombatState.pendingTies — public once both cards in the tie are known
     resolvedDuels: ResolvedDuel[],     // as today — includes real card identities, since they're revealed
   } | null,
+  roundSummaryDismissedBy: { a: boolean; b: boolean }, // only meaningful while phase === 'round-summary'
 }
 ```
+
+When `isCombatFinished` becomes true (all duels resolved, no pending
+ties), either client transitions `public_state.phase` to
+`'round-summary'` (both compute the same `resolvedDuels`, so this is safe
+regardless of which client's write wins the race) and both render the
+round-result summary locally (same `buildRoundResultCards` logic as
+single-player) from `public_state.combat.resolvedDuels`. Each client, when
+its own player clicks "Continue", sets its own flag in
+`roundSummaryDismissedBy` (`{a: true}` or `{b: true}`, never touching the
+other's flag) via a normal optimistic-concurrency update. Once **both**
+flags are true (detected by whichever client's update makes it so, which
+may be either — both are computing the same `processRoundEnd` result from
+the same prior state, so this is safe), that client also writes the
+`processRoundEnd` result (aged rest, new resting winners, attacker/defender
+swap, phase back to `'selecting'` or `'game-over'` if `determineWinner`
+finds a winner, and `roundSummaryDismissedBy` reset to `{a: false, b:
+false}`) in the same update.
 
 Notably: the **defender's chosen defense pool** is not written to
 `public_state` as full identities when first submitted — only the
@@ -239,24 +280,36 @@ row.
    `status != 'waiting'`, shows an error ("místnost neexistuje, už je plná,
    nebo hra skončila"). Otherwise, in one update, sets
    `player_b_nickname`, `player_b_uid = auth.uid()`, and flips
-   `status = 'playing'` (guarded by `WHERE status = 'waiting'` so two
-   simultaneous joiners can't both succeed).
-4. The `status = 'playing'` transition (detected via Realtime by player A's
-   client, or directly by player B's client that just performed it) is what
-   triggers dealing: **exactly one** client — the one that observes the
-   transition into `'playing'` and successfully acquires it via the same
-   `version`-guarded optimistic-concurrency update used elsewhere (first
-   writer wins; the loser just proceeds to read the result) — calls the
+   `status = 'dealing'` (guarded by `WHERE status = 'waiting'` so two
+   simultaneous joiners can't both succeed — Postgres's row-level update
+   guarantees only one concurrent `UPDATE ... WHERE status = 'waiting'`
+   actually matches a row, even under a race).
+4. Player B's client (the one whose update above actually succeeded — the
+   only client that can ever observe the `'waiting' -> 'dealing'`
+   transition happen as a direct result of its own write) calls the
    `deal_room(room_id)` Postgres RPC described in the Trust Model section.
-   This function: builds/shuffles the 32-card deck server-side, applies the
-   PvP ace-guarantee rule (each side gets exactly 2 Aces), randomly picks
-   the starting attacker, inserts both `player_hands` rows, and writes
-   `attacker_side` plus hand-count-only fields into `rooms.public_state`.
-   Both clients then fetch: the caller reads the RPC's own confirmation,
-   the other client picks up the resulting row via its existing Realtime
-   subscription. Each client separately queries its **own**
-   `player_hands` row (RLS-restricted to its own `auth.uid()`) to load its
-   private army into memory + `localStorage`.
+   This function is written to be **idempotent and safe against being
+   called more than once**: it starts a transaction, takes a row lock on
+   the `rooms` row (`SELECT ... FOR UPDATE`), and immediately checks
+   `status`; if `status` is no longer `'dealing'` (e.g., a retried/duplicate
+   call after dealing already completed), it simply returns without doing
+   anything further. Otherwise it: builds/shuffles the 32-card deck
+   server-side, applies the PvP ace-guarantee rule (each side gets exactly
+   2 Aces), randomly picks the starting attacker, inserts both
+   `player_hands` rows, writes `attacker_side` plus hand-count-only fields
+   into `rooms.public_state`, and finally flips `status = 'playing'` —
+   all within the same transaction, so any other client's concurrent call
+   either blocks briefly on the row lock and then sees `status = 'playing'`
+   already (no-op), or never gets a chance to run concurrently at all.
+   Only Player B's client needs to actually call this RPC (since it's the
+   only client that can win the `'waiting' -> 'dealing'` race), but the
+   function's idempotency guard means it's safe even if the client
+   implementation retries the call defensively (e.g., after a network
+   error where the client isn't sure if the call succeeded).
+   Player A's client detects the `status = 'playing'` transition via its
+   Realtime subscription. Both clients then separately query their **own**
+   `player_hands` row (RLS-restricted to their own `auth.uid()`) to load
+   their private army into memory + `localStorage`.
 5. Game proceeds per existing rules; `public_state` is updated after each
    player action (see Sync Protocol).
 6. On win, `status = 'finished'`, `winner` set; both clients show the
@@ -295,16 +348,21 @@ publicly vs. kept private* differs:
    `public_state`).
 5. Repeat 3–4 until all attacker slots for the round are revealed and
    resolved (including tie-chaining, unchanged from existing rules).
-6. Round-result summary is derived locally by both clients from
-   `resolvedDuels` (same as existing single-player `buildRoundResultCards`).
-   Round-end processing (`processRoundEnd`: age resting cards, add winners,
-   swap attacker/defender roles, check win) is computed locally by both
-   clients; each client writes the resulting counts for **its own** army
-   into `public_state` and updates its own row in `player_hands` — the
-   attacker/defender role swap and phase transition to `'round-end'` is
-   written by whichever client's write reaches the row first under the
-   normal optimistic-concurrency guard (idempotent either way, since both
-   compute the same result from the same prior state).
+6. Once `isCombatFinished` is true, `public_state.phase` moves to
+   `'round-summary'` (see the phase-value note in Data Model above) and
+   both clients render the round-result summary locally from
+   `resolvedDuels` (same as existing single-player
+   `buildRoundResultCards`), each waiting for their own player to click
+   "Continue". Round-end processing (`processRoundEnd`: age resting cards,
+   add winners, swap attacker/defender roles, check win) is only actually
+   applied once **both** players have dismissed (`roundSummaryDismissedBy`
+   is `{a: true, b: true}`) — see Data Model for the exact mechanics. Each
+   client, upon dismissing, updates its own row in `player_hands` to
+   reflect the processed result for its own army; the transition of
+   `public_state.phase` back to `'selecting'` (or `'game-over'`) happens as
+   part of whichever client's write causes both dismissal flags to become
+   true (idempotent either way, since both compute the same result from
+   the same prior state).
 7. If `determineWinner` finds a winner, room `status` and `winner` are set.
 
 Any write uses the optimistic-concurrency guard (`WHERE version = expected`).
