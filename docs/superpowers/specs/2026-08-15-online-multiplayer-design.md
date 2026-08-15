@@ -56,7 +56,23 @@ Concretely:
 - Each player's browser is the **sole holder** of the exact identity of that
   player's own unplaced cards (their `available` army and the identities of
   cards in their `resting` area). This data **never leaves that browser** in
-  full form.
+  full form once the game is underway.
+- **Exception — the initial deal.** Randomly splitting a 32-card deck into
+  two private 16-card hands (with the ace-guarantee rule) is a case where
+  *someone* has to see both hands at the moment of dealing. Rather than
+  have either player's browser compute the full split (which would let that
+  browser's memory/devtools reveal the opponent's entire hand for the whole
+  game), this one step is delegated to a minimal **Supabase Postgres RPC
+  function** (`deal_room(room_id)`, `SECURITY DEFINER`, written in
+  PL/pgSQL). It runs once, server-side, at the moment the room transitions
+  to `playing`: it shuffles, applies the ace-guarantee rule, writes each
+  player's private hand into the RLS-protected `player_hands` table (see
+  Data Model), and writes only counts into the room's public state. Neither
+  client ever receives the other's hand — the function's result set is
+  never returned to any client, only the two private rows are written.
+  This is the **only** server-computed game-rule logic in this feature;
+  everything after dealing (combat, rest, win detection) remains
+  trusted-peer as described above.
 - Only **public information** is synced between the two browsers via
   Supabase: whose turn/role it is, how many cards each side has available
   and resting (with per-resting-card countdown), which cards have been
@@ -114,6 +130,25 @@ Local pure game-logic         Realtime channel)      Local pure game-logic
   its intended action against the new state, or shows a "please retry"
   message if the action no longer makes sense, e.g. it's no longer that
   player's turn).
+- **Supabase Anonymous Auth**: each browser signs in via
+  `supabase.auth.signInAnonymously()` on first use. This is a real Supabase
+  feature that creates a stable `auth.uid()` for that browser with no
+  credentials/UI, and the Supabase client SDK persists the resulting
+  session in `localStorage` automatically. This single mechanism solves two
+  problems at once: (1) it's the identity used by Postgres Row Level
+  Security policies to scope `player_hands` access (see Data Model), and
+  (2) it's what a reconnecting browser presents to prove which side (A or
+  B) it is, since the SDK restores the same `auth.uid()` from its persisted
+  session on reload.
+- **Single-writer-per-step rule**: to eliminate any ambiguity about which
+  client is allowed to write which event (see Sync Protocol), exactly one
+  side is authoritative for each step: the **attacker's** client is the only
+  one that reveals attacker cards (it already knows all of its own cards'
+  identities — "random attack" only means the attacker doesn't get to
+  *choose* which 3 are drawn, not that the attacker's own client is unaware
+  of them); the **defender's** client is the only one that assigns/reveals
+  which of its own committed defense cards resolves the current duel. No
+  step is ever described as "either client may perform it."
 
 ## Data Model
 
@@ -128,68 +163,103 @@ New Supabase Postgres table, `rooms`:
 | `created_at` | timestamptz | for cleanup of stale rooms (future housekeeping, not implemented now) |
 | `player_a_nickname` | text, nullable | set when room is created |
 | `player_b_nickname` | text, nullable | set when second player joins |
+| `player_a_uid` | uuid, nullable | Supabase anonymous-auth `auth.uid()` of player A's browser, set at create time |
+| `player_b_uid` | uuid, nullable | Supabase anonymous-auth `auth.uid()` of player B's browser, set at join time |
 | `attacker_side` | text | `'a'` \| `'b'` |
 | `public_state` | jsonb | see shape below |
 | `winner` | text, nullable | `'a'` \| `'b'` \| null |
 
+Second table, `player_hands` — one row per player per room, holding the
+**private** data. Protected by Row Level Security: `SELECT`/`UPDATE` allowed
+only where `auth.uid() = player_uid`, so a player's own client can query
+its own row but never the opponent's.
+
+| Column | Type | Notes |
+|---|---|---|
+| `room_id` | uuid, FK → `rooms.id` | |
+| `player_uid` | uuid | matches `rooms.player_a_uid` or `player_b_uid` |
+| `available` | jsonb | array of `Card` — this player's unplaced army |
+| `resting` | jsonb | array of `RestingCard` — this player's resting army |
+
+Primary key: (`room_id`, `player_uid`).
+
 `public_state` JSON shape (mirrors the relevant subset of the existing
-`GameState`/`Army` types in `lib/game/types.ts`, but with **counts only**
-for undisclosed cards):
+`GameState`/`CombatState` types in `lib/game/types.ts`, using the same
+`GamePhase` values — including `'round-end'`, matching the existing enum
+exactly — and including enough combat detail to fully reconstruct an
+in-progress round after a reload, not just counts):
 
 ```ts
 {
   playerA: { availableCount: number; resting: { roundsRemaining: number }[] /* no card identity */ },
   playerB: { availableCount: number; resting: { roundsRemaining: number }[] },
-  phase: 'selecting' | 'combat' | 'round-result' | 'game-over',
+  phase: 'selecting' | 'combat' | 'round-end' | 'game-over', // matches lib/game/types.ts GamePhase exactly
   combat: {
-    // battlefield cards revealed so far are full Card objects (public once revealed)
-    revealedAttackerCards: Card[],
-    resolvedDuels: ResolvedDuel[], // as today — includes real card identities, since they're revealed
-    // counts of cards not yet revealed this round, to render face-down placeholders
-    attackerSlotsRemaining: number,
-    defenderSlotsSubmitted: number, // has defender committed their pool yet? (identities stay local until each is revealed)
+    attackerSlotsTotal: number,        // how many attacker cards this round (2 or 3)
+    attackerCardsRevealed: Card[],     // full Card objects, public once revealed, in reveal order
+    revealedCard: Card | null,         // the currently-revealed-but-unresolved attacker card, if any
+    defenderCommitted: boolean,        // has defender submitted its 3-card pool? (identities stay private until each resolves)
+    pendingTies: Duel[],               // mirrors CombatState.pendingTies — public once both cards in the tie are known
+    resolvedDuels: ResolvedDuel[],     // as today — includes real card identities, since they're revealed
   } | null,
 }
 ```
 
-Notably: the **defender's chosen 3 cards** are not written to `public_state`
-as full identities when first submitted — only a flag that the defender has
-committed, and a count. As each duel is revealed in sequence, the specific
-defending card used for that duel becomes part of `resolvedDuels` (already
-public, matches existing single-player `ResolvedDuel` shape). Same logic
-applies to a random attacker's 3 drawn cards: initially only a count is
-shared; identities appear in `resolvedDuels` as each is revealed.
+Notably: the **defender's chosen defense pool** is not written to
+`public_state` as full identities when first submitted — only the
+`defenderCommitted` flag. As each duel is revealed and resolved in
+sequence, the specific defending card used for that duel becomes part of
+`resolvedDuels` (already public, matches existing single-player
+`ResolvedDuel` shape) and/or `pendingTies` (for chained ties awaiting more
+duels before resolution, matching existing `CombatState.pendingTies`
+semantics). This `combat` object is a complete enough snapshot that a
+client reloading mid-round can reconstruct exactly where the round stands
+without needing anything beyond `public_state` + its own `player_hands`
+row.
 
 ## Room Lifecycle
 
 1. Player A clicks "Hrát s kamarádem online" → "Založit hru", enters a
-   nickname. Client generates a random 5-digit numeric code (checked for
-   uniqueness against `rooms.code` via a Supabase query; regenerate on
-   collision — extremely unlikely with a 5-digit space but handled).
-   Inserts a `rooms` row with `status = 'waiting'`.
+   nickname. Client ensures it has a Supabase anonymous-auth session
+   (`supabase.auth.signInAnonymously()` if not already signed in — the SDK
+   persists this session in `localStorage` automatically, no app code
+   needed for that part). Client generates a random 5-digit numeric code
+   and attempts to `INSERT` a `rooms` row with that `code` and
+   `status = 'waiting'`, `player_a_uid = auth.uid()`. Because `code` has a
+   unique constraint, a collision causes the insert to fail; the client
+   regenerates a new random code and retries, up to 5 attempts, after which
+   it shows an error ("nepodařilo se založit místnost, zkus to znovu").
+   With a 5-digit space (100,000 codes) and only ever a handful of rooms
+   `waiting`/`playing` at once, collisions are expected to be rare, but the
+   retry loop makes this robust regardless.
 2. Player A shares the code (shown large on screen, with a copy button).
 3. Player B clicks "Hrát s kamarádem online" → "Připojit se", enters the
-   code + a nickname. Client looks up the row by `code`; if `status !=
-   'waiting'`, shows an error ("místnost už je plná nebo hra skončila").
-   Otherwise sets `player_b_nickname`, flips `status = 'playing'`.
-4. Once `status = 'playing'`, both clients independently: build the full
-   32-card deck, shuffle (using a **shared seed** agreed via the room row,
-   see below), deal with the PvP ace-guarantee rule, and locally split into
-   "my private army" (kept in memory + localStorage) vs. "opponent army"
-   (counts only, written to `public_state`).
-   - **Shared shuffle seed**: to ensure both clients deal the *same* 32-card
-     partition without transmitting card identities, Player A (room
-     creator) generates a random seed integer at deck-creation time and
-     writes it into the room row (e.g. `deck_seed` column) before dealing.
-     Both clients then run the exact same seeded-shuffle algorithm
-     (deterministic PRNG) over the same canonical card order, guaranteeing
-     both derive identical hands for "player A" and "player B" without
-     either side ever transmitting the other's cards.
-5. Attacker for round 1 is decided by a coin flip using the same seed
-   (deterministic from `deck_seed`, e.g. `deck_seed % 2`).
-6. Game proceeds per existing rules; `public_state` is updated after each
+   code + a nickname, and similarly ensures an anonymous-auth session.
+   Client looks up the row by `code`; if it doesn't exist or
+   `status != 'waiting'`, shows an error ("místnost neexistuje, už je plná,
+   nebo hra skončila"). Otherwise, in one update, sets
+   `player_b_nickname`, `player_b_uid = auth.uid()`, and flips
+   `status = 'playing'` (guarded by `WHERE status = 'waiting'` so two
+   simultaneous joiners can't both succeed).
+4. The `status = 'playing'` transition (detected via Realtime by player A's
+   client, or directly by player B's client that just performed it) is what
+   triggers dealing: **exactly one** client — the one that observes the
+   transition into `'playing'` and successfully acquires it via the same
+   `version`-guarded optimistic-concurrency update used elsewhere (first
+   writer wins; the loser just proceeds to read the result) — calls the
+   `deal_room(room_id)` Postgres RPC described in the Trust Model section.
+   This function: builds/shuffles the 32-card deck server-side, applies the
+   PvP ace-guarantee rule (each side gets exactly 2 Aces), randomly picks
+   the starting attacker, inserts both `player_hands` rows, and writes
+   `attacker_side` plus hand-count-only fields into `rooms.public_state`.
+   Both clients then fetch: the caller reads the RPC's own confirmation,
+   the other client picks up the resulting row via its existing Realtime
+   subscription. Each client separately queries its **own**
+   `player_hands` row (RLS-restricted to its own `auth.uid()`) to load its
+   private army into memory + `localStorage`.
+5. Game proceeds per existing rules; `public_state` is updated after each
    player action (see Sync Protocol).
-7. On win, `status = 'finished'`, `winner` set; both clients show the
+6. On win, `status = 'finished'`, `winner` set; both clients show the
    existing game-over UI.
 
 ## Sync Protocol (per round)
@@ -200,31 +270,41 @@ publicly vs. kept private* differs:
 
 1. **Attacker selects cards** (random if NPC-style role, i.e. always random
    in PvP per existing attacker rule — attacker never freely chooses, cards
-   are randomly drawn from their own available pool by their own client).
-   Attacker's client writes `combat.attackerSlotsRemaining = N` (count
-   only) to `public_state`, bumps `version`.
+   are randomly drawn from their own available pool by their own client;
+   the attacker's own client knows these identities immediately, it just
+   didn't get to pick them). Attacker's client writes
+   `combat.attackerSlotsTotal = N` (count only) to `public_state`, bumps
+   `version`.
 2. **Defender selects cards** (free choice from their own available pool,
-   as today). Defender's client writes a "defender committed" flag + count
+   as today). Defender's client writes `combat.defenderCommitted = true`
    to `public_state` (not identities), bumps `version`.
-3. Once both are committed, either client can trigger "reveal next attacker
-   card" (deterministically the next in the pre-agreed shuffle order); that
-   client writes the revealed card into `public_state.combat.revealedAttackerCards`
-   and appends it, bumps `version`.
-4. The defender's client (whichever browser owns the defending army) then
-   computes/sends the actual defending card used for this duel (using
-   existing `assignDefenderCard`/`finalizeCombat` logic locally), appends
-   the resulting `ResolvedDuel` (both card identities + winner) to
-   `public_state.combat.resolvedDuels`, bumps `version`. Both clients apply
-   `lib/game` capture logic locally to update their own idea of both
-   armies (their own precisely, opponent's by count only).
+3. Once both are committed, the **attacker's client** (and only the
+   attacker's client — see the single-writer-per-step rule in Architecture
+   Overview) reveals the next attacker card: it writes that card into
+   `public_state.combat.attackerCardsRevealed` (appended) and sets it as
+   `combat.revealedCard`, bumps `version`.
+4. The **defender's client** (and only the defender's client) then
+   determines the actual defending card used for this duel (using existing
+   `assignDefenderCard`/`finalizeCombat` logic locally against its own
+   private pool), clears `revealedCard`, and appends the resulting
+   `ResolvedDuel` (both card identities + winner) — or, for a tie, appends
+   to `pendingTies` instead, matching existing `CombatState` semantics — to
+   `public_state.combat`, bumps `version`. Both clients apply `lib/game`
+   capture logic locally to update their own idea of both armies (their
+   own precisely from `player_hands`, opponent's by count only from
+   `public_state`).
 5. Repeat 3–4 until all attacker slots for the round are revealed and
    resolved (including tie-chaining, unchanged from existing rules).
 6. Round-result summary is derived locally by both clients from
    `resolvedDuels` (same as existing single-player `buildRoundResultCards`).
    Round-end processing (`processRoundEnd`: age resting cards, add winners,
    swap attacker/defender roles, check win) is computed locally by both
-   clients and the resulting counts are written to `public_state`, bumps
-   `version`.
+   clients; each client writes the resulting counts for **its own** army
+   into `public_state` and updates its own row in `player_hands` — the
+   attacker/defender role swap and phase transition to `'round-end'` is
+   written by whichever client's write reaches the row first under the
+   normal optimistic-concurrency guard (idempotent either way, since both
+   compute the same result from the same prior state).
 7. If `determineWinner` finds a winner, room `status` and `winner` are set.
 
 Any write uses the optimistic-concurrency guard (`WHERE version = expected`).
@@ -235,19 +315,31 @@ simply adopts the new state.
 
 ## Reconnection & Persistence
 
-- `public_state`, `status`, `winner`, `attacker_side`, `deck_seed` all live
-  in Supabase Postgres — surviving any client disconnect/reload.
-- Each browser persists, in `localStorage`, keyed by room code: a random
-  **player token** (generated at room-create/join time, used to tell the
-  two browsers apart on reconnect — "am I player A or B in this room?") and
-  its own full private army state (available + resting card identities).
-- On reload, a client: reads room code + player token from `localStorage`,
-  fetches the current `rooms` row from Supabase, determines whether it's
-  player A or B from the token, restores its own private army from
-  `localStorage`, and resubscribes to Realtime for further updates.
-- If `localStorage` is cleared or the game is opened on a different
-  device, reconnection to that specific game is not possible (explicitly
-  accepted limitation — see Non-goals).
+- `public_state`, `status`, `winner`, `attacker_side`, `player_a_uid`,
+  `player_b_uid` all live in Supabase Postgres — surviving any client
+  disconnect/reload. The private `player_hands` rows likewise persist
+  server-side (RLS-protected), which means a player's own hand actually
+  **does not strictly need** to be duplicated into `localStorage` to
+  survive a reload — it can simply be re-fetched from its own
+  `player_hands` row on reconnect. `localStorage` is still used, but only
+  for two small, non-sensitive things: the room `code` the browser last
+  played (so it knows which room to reconnect to) and a client-side cache
+  of the last-rendered state (purely as a fast-paint optimization before
+  the fresh Supabase fetch resolves — never treated as the source of truth).
+- The Supabase JS SDK persists the anonymous-auth session (containing
+  `auth.uid()`) in `localStorage` itself, automatically, as part of its
+  normal operation — this is what lets a reconnecting browser be
+  recognized as "player A" or "player B" for a given room: on reload, the
+  client restores its Supabase session (SDK-managed), fetches the `rooms`
+  row for the last-known `code` (app-managed `localStorage` key), compares
+  its restored `auth.uid()` against `player_a_uid`/`player_b_uid` on that
+  row to determine its side, and queries its own `player_hands` row (RLS
+  automatically permits this since it matches `auth.uid()`).
+- If the Supabase anonymous-auth session or the room-code `localStorage`
+  entry is cleared, or the game is opened on a different device, that
+  browser can no longer be recognized as its previous side (explicitly
+  accepted limitation — see Non-goals; there is deliberately no manual
+  "enter your player token" recovery flow in this version).
 - No explicit disconnect timeout: the game simply waits. There's no "kick
   inactive player" mechanic in this version.
 
@@ -275,37 +367,49 @@ simply adopts the new state.
 ## New/Changed Modules (implementation-level sketch, for the follow-up plan)
 
 - `lib/multiplayer/supabaseClient.ts` — Supabase client init (URL/anon key
-  from env vars).
-- `lib/multiplayer/roomCode.ts` — room code generation + collision check.
-- `lib/multiplayer/seededShuffle.ts` — deterministic seeded shuffle
-  (separate from the existing `Math.random`-based `createDeck`/`dealHands`,
-  or an overload accepting a seeded RNG — existing `dealHands`/`createDeck`
-  in `lib/game/deck.ts` already accept an `rng: () => number` parameter per
-  the technical notes, so this likely reuses that hook with a seeded PRNG
-  implementation).
+  from env vars) + anonymous-auth sign-in helper.
+- `lib/multiplayer/roomCode.ts` — room code generation + collision-retry
+  logic (up to 5 attempts on unique-constraint conflict).
+- `supabase/migrations/*.sql` — `rooms` table, `player_hands` table, RLS
+  policies (`auth.uid() = player_uid`), and the `deal_room(room_id)`
+  `SECURITY DEFINER` PL/pgSQL function (builds/shuffles the 32-card deck,
+  applies the PvP ace-guarantee rule, picks the starting attacker, inserts
+  both `player_hands` rows, writes count-only fields to `rooms.public_state`).
+  This function reimplements just the shuffle+ace-guarantee-deal step
+  server-side in SQL; it does not need to reuse `lib/game/deck.ts` (that
+  remains the client-side implementation for single-player), but its
+  behavior (ace-guarantee rule, 32-card composition) must match the same
+  rules and should be unit-tested (e.g., via `pgTAP` or a small Node script
+  against a local Supabase instance) for equivalence.
 - `lib/multiplayer/roomSync.ts` — reads/writes `public_state` with
-  optimistic concurrency, wraps Supabase Realtime subscription.
+  optimistic concurrency, wraps Supabase Realtime subscription, enforces
+  the single-writer-per-step rule client-side (i.e., a client simply never
+  attempts to write a step that isn't its own responsibility).
 - `hooks/useMultiplayerGameState.ts` — mirrors `hooks/useGameState.ts`'s
   public interface/shape as closely as possible so `GameBoard` and other
   existing presentational components need minimal/no changes, but sources
-  its state from the room-sync layer instead of pure local state +
-  localStorage.
+  its state from the room-sync layer (public `rooms` row + own
+  `player_hands` row) instead of pure local state + localStorage.
 - `app/page.tsx` (or a new route e.g. `app/online/[code]/page.tsx`) — new
   main-menu / room-create / room-join screens; existing single-player page
   content becomes one branch of this menu.
 - New Supabase project setup (user will need help with this — creating the
-  project, running the `rooms` table migration/SQL, obtaining env vars for
-  Vercel).
+  project, running the `rooms`/`player_hands` migrations, creating the
+  `deal_room` function, configuring RLS policies, enabling anonymous auth,
+  obtaining env vars for Vercel).
 
 ## Testing Strategy
 
-- Unit tests for `lib/multiplayer/seededShuffle.ts` (determinism: same seed
-  always produces the same partition/order).
+- Unit tests for `lib/multiplayer/roomCode.ts` (collision-retry logic, max
+  attempts).
 - Unit tests for `lib/multiplayer/roomSync.ts` reducers/merge logic (public
-  state + private state combination produces the same `GameState` shape
-  consumable by existing `lib/game/*` functions).
+  state + private `player_hands` state combination produces the same
+  `GameState` shape consumable by existing `lib/game/*` functions).
 - Unit tests for optimistic-concurrency conflict handling (simulate a
   stale-version write, assert refetch-and-reconcile behavior).
+- A small equivalence test/script for the `deal_room` SQL function's
+  ace-guarantee logic (each side always gets exactly 2 Aces, 16 cards each,
+  no duplicate/missing cards across both hands).
 - Manual end-to-end test: two browser windows (or two devices) playing a
   full game to completion, including a deliberate disconnect/reconnect of
   one side mid-round.
