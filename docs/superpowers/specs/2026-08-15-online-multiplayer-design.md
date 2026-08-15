@@ -196,6 +196,7 @@ clients at all — rows are only ever created by the `SECURITY DEFINER`
 | `resting` | jsonb | array of `RestingCard` — this player's resting army |
 | `pending_attack_queue` | jsonb, nullable | when this player is attacker this round: the full ordered array of `Card` drawn for the round, including cards not yet revealed to the opponent. `null` when this player isn't the current round's attacker, or between rounds. |
 | `pending_defender_pool` | jsonb, nullable | when this player is defender this round: the full array of `Card` they committed as their defense pool, including cards not yet used to resolve a duel. `null` when this player isn't the current round's defender, or between rounds. |
+| `last_applied_round` | integer | the highest `public_state.roundNumber` for which this side has already applied its own aging/`processRoundEnd`; starts at 0 |
 
 Primary key: (`room_id`, `player_uid`).
 
@@ -229,6 +230,7 @@ that doesn't exist in single-player):
 
 ```ts
 {
+  roundNumber: number,                 // starts at 1, increments every time a round fully concludes (both combat rounds and skip-combat aging-only rounds)
   playerA: { availableCount: number; resting: { roundsRemaining: number }[] /* no card identity */ },
   playerB: { availableCount: number; resting: { roundsRemaining: number }[] },
   phase: 'selecting' | 'combat' | 'round-summary' | 'game-over',
@@ -241,8 +243,28 @@ that doesn't exist in single-player):
     resolvedDuels: ResolvedDuel[],     // as today — includes real card identities, since they're revealed
   } | null,
   roundSummaryDismissedBy: { a: boolean; b: boolean }, // only meaningful while phase === 'round-summary'
+  roundEndAppliedBy: { a: boolean; b: boolean },        // has each side durably applied processRoundEnd to its own player_hands for the round currently finishing?
 }
 ```
+
+`combat` (including `resolvedDuels`) is **not** cleared/nulled as part of
+the `'round-summary' -> 'selecting'` phase transition — it's deliberately
+kept around, unmodified, until `roundEndAppliedBy` is `{a: true, b: true}`
+(see step 6 below), specifically so that a client which was disconnected
+during the transition can still find `resolvedDuels` in `public_state`
+when it reconnects and self-heals. It's only cleared to `null` (and
+`roundEndAppliedBy` reset to `{a: false, b: false}`) once a *new* round's
+combat actually begins (step 1 of the next round), which itself cannot
+happen until the previous round's `roundEndAppliedBy` is fully `{a: true,
+b: true}` — so there is no window where a not-yet-self-healed client's
+needed data has already been overwritten by a new round.
+
+Each `player_hands` row additionally has a `last_applied_round` integer
+column: the highest `roundNumber` for which this side has already applied
+its own aging/`processRoundEnd`. This is what lets a client tell, on
+load/reconnect, whether it still owes itself a pending aging or
+round-end application for the current `roundNumber`, without relying on
+having witnessed any particular realtime event live.
 
 When `isCombatFinished` becomes true (all duels resolved, no pending
 ties), either client transitions `public_state.phase` to
@@ -349,20 +371,29 @@ publicly vs. kept private* differs:
 0. **Round start / slot-count check** (mirrors `computeSlotCount` and the
    `slotCount === 0` branch of `beginRound` exactly). The client on the
    **current attacker's side** (`state.attackerSide`, tracked in
-   `rooms.attacker_side`) is responsible for this step, since it's a
-   deterministic computation from already-public data
+   `rooms.attacker_side`) is responsible for the public part of this step,
+   since it's a deterministic computation from already-public data
    (`playerA.availableCount`, `playerB.availableCount`): it computes
    `slotCount = min(3, attackerAvailableCount, defenderAvailableCount)`.
    - If `slotCount === 0`: no combat this round. The attacker-side client
-     writes the aged-rest result (mirroring `ageArmies` +
-     `determineWinner`) directly to `public_state` (updated resting
-     countdowns for both sides, `phase` staying `'selecting'` or becoming
-     `'game-over'` with `winner` set) — no role swap, no `player_hands`
-     change (aging only touches `resting` countdown numbers, which live in
-     `public_state`, not card identities), no `combat` object created.
-     Skip the remaining steps below and return to step 0 for the next
-     round (still the same attacker, per existing single-player rule that
-     skipped rounds don't swap roles).
+     increments `public_state.roundNumber` and writes the publicly-visible
+     part of the aged-rest result (updated resting countdown numbers and
+     `availableCount`/`restingCount` for both sides, `determineWinner`
+     check, `phase` staying `'selecting'` or becoming `'game-over'` with
+     `winner` set) — no role swap, no new `combat` object. **Both**
+     clients (not just the attacker-side one) then independently apply
+     `ageRestingCards` to their **own** `player_hands` row — this is
+     necessary because aging moves expired cards from `resting` back into
+     `available` by identity, which is private data the attacker-side
+     client cannot see or write for the other side. Each client does this
+     as a self-contained reconciliation: on observing (live, or on
+     reload/reconnect) that `public_state.roundNumber` is now greater than
+     its own `player_hands.last_applied_round`, it applies `ageRestingCards`
+     to its own `resting`/`available` and bumps its own
+     `last_applied_round` to match — idempotent and safe to run redundantly
+     since it's purely a function of that client's own prior state.
+     Return to step 0 for the next round (still the same attacker, per
+     existing single-player rule that skipped rounds don't swap roles).
    - Otherwise (`slotCount` is 1, 2, or 3 — matching
      `computeSlotCount`'s actual range, not just "2 or 3"), proceed to
      step 1.
@@ -409,39 +440,47 @@ publicly vs. kept private* differs:
    "Continue". Clicking "Continue" **only** sets that player's own flag
    (`roundSummaryDismissedBy.a = true` or `.b = true`) in `public_state` —
    it does **not** touch `player_hands` yet, and it does not compute
-   `processRoundEnd` yet. Each client, via its Realtime subscription, is
-   watching for the moment `roundSummaryDismissedBy` becomes `{a: true, b:
-   true}` (this can be observed by either client, regardless of which
-   client's dismiss-write was the second/deciding one). The moment a client
-   observes both flags true, it computes `processRoundEnd` **for its own
-   side only** and writes the result to its **own** `player_hands` row
-   (clearing `pending_attack_queue`/`pending_defender_pool`, updating
-   `available`/`resting`) — each client can only ever write its own
-   `player_hands` row per RLS, so this step is inherently duplicated once
-   per client, which is correct and required (not a race to avoid). Only
-   one of the two clients' writes to `public_state` (updating counts,
-   `attacker_side` swap, phase back to `'selecting'`/`'game-over'`, and
-   resetting `roundSummaryDismissedBy` to `{a: false, b: false}`) actually
-   succeeds under the normal optimistic-concurrency guard; the other
-   client's equivalent write simply fails its version check and is
-   discarded (harmless no-op, since both computed the identical result from
-   the identical prior state).
+   `processRoundEnd` yet.
 
-   **Durability against disconnects at this exact moment**: a client isn't
-   required to be online at the instant both flags become true — the
-   "apply my own `processRoundEnd`" step doesn't rely on a live transient
-   event. Instead, this is a stateless reconciliation any client performs
-   whenever it loads/reconnects: if `public_state.phase` is anything other
-   than `'round-summary'` for the current round (i.e., the round has
-   already been advanced past summary — `phase` is `'selecting'` or
-   `'game-over'`) **but** this client's own `player_hands` row still has a
-   non-null `pending_attack_queue` or `pending_defender_pool` (meaning this
-   client never got to apply its own `processRoundEnd` locally), it applies
-   `processRoundEnd` to itself immediately using its last-known pending
-   state before doing anything else. This makes the round-end application
-   durable regardless of exactly when/whether a client was connected at
-   the moment both dismiss flags flipped — a reconnecting client always
-   self-heals to a consistent state on load.
+   Each client — whether it observes this live via Realtime, or discovers
+   it on load/reconnect — checks two things independently: (a) is
+   `roundSummaryDismissedBy` now `{a: true, b: true}`, and (b) is my own
+   `player_hands.last_applied_round` still less than
+   `public_state.roundNumber` (meaning I haven't applied my own
+   `processRoundEnd` for this round yet)? If both are true, the client
+   computes `processRoundEnd` **for its own side only** — using
+   `public_state.combat.resolvedDuels` (guaranteed still present; see the
+   note in Data Model that `combat` is deliberately not cleared until this
+   whole step completes) together with its own `pending_attack_queue`/
+   `pending_defender_pool` — and writes the result to its **own**
+   `player_hands` row (clearing both `pending_*` fields, updating
+   `available`/`resting`, and setting `last_applied_round =
+   public_state.roundNumber`). This check is stateless and safe to
+   perform redundantly on every load/reconnect/Realtime event; each client
+   only ever writes its own row, so both clients doing this independently
+   (whether at the same moment or hours apart, if one was disconnected) is
+   correct and required, not a race to avoid.
+
+   Separately, once a client observes `roundEndAppliedBy` is `{a: true, b:
+   true}` (each side sets its own flag as part of the write described
+   above), it also writes the shared/public conclusion of the round:
+   increments `roundNumber`, updates public `availableCount`/`resting`
+   summaries for both sides, swaps `attacker_side`, sets `phase` back to
+   `'selecting'` (or `'game-over'` if `determineWinner` finds a winner),
+   clears `combat` to `null`, and resets `roundSummaryDismissedBy` and
+   `roundEndAppliedBy` to `{a: false, b: false}` for the next round. This
+   write is guarded by the normal optimistic-concurrency check, so if both
+   clients attempt it around the same time, only one succeeds; the other's
+   identical-result write is discarded as a harmless no-op.
+
+   Because `combat.resolvedDuels` is only cleared once both
+   `roundEndAppliedBy` flags are confirmed true, and because each client's
+   own reconciliation check is driven entirely by durable, persisted state
+   (`public_state.roundSummaryDismissedBy`/`roundNumber` and its own
+   `player_hands.last_applied_round`) rather than a transient event it
+   might have missed, this remains correct regardless of when either
+   client was connected or disconnected during the transition — a
+   reconnecting client always finds everything it needs to self-heal.
 7. If `determineWinner` finds a winner, room `status` and `winner` are set.
 
 Any write uses the optimistic-concurrency guard (`WHERE version = expected`).
