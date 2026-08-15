@@ -233,7 +233,7 @@ that doesn't exist in single-player):
   playerB: { availableCount: number; resting: { roundsRemaining: number }[] },
   phase: 'selecting' | 'combat' | 'round-summary' | 'game-over',
   combat: {
-    attackerSlotsTotal: number,        // how many attacker cards this round (2 or 3)
+    attackerSlotsTotal: number,        // how many attacker cards this round (1-3, matches computeSlotCount)
     attackerCardsRevealed: Card[],     // full Card objects, public once revealed, in reveal order
     revealedCard: Card | null,         // the currently-revealed-but-unresolved attacker card, if any
     defenderCommitted: boolean,        // has defender submitted its 3-card pool? (identities stay private until each resolves)
@@ -346,16 +346,41 @@ This follows the existing single-player round structure exactly
 (`lib/game/state.ts` functions are reused as-is); only *what gets persisted
 publicly vs. kept private* differs:
 
+0. **Round start / slot-count check** (mirrors `computeSlotCount` and the
+   `slotCount === 0` branch of `beginRound` exactly). The client on the
+   **current attacker's side** (`state.attackerSide`, tracked in
+   `rooms.attacker_side`) is responsible for this step, since it's a
+   deterministic computation from already-public data
+   (`playerA.availableCount`, `playerB.availableCount`): it computes
+   `slotCount = min(3, attackerAvailableCount, defenderAvailableCount)`.
+   - If `slotCount === 0`: no combat this round. The attacker-side client
+     writes the aged-rest result (mirroring `ageArmies` +
+     `determineWinner`) directly to `public_state` (updated resting
+     countdowns for both sides, `phase` staying `'selecting'` or becoming
+     `'game-over'` with `winner` set) — no role swap, no `player_hands`
+     change (aging only touches `resting` countdown numbers, which live in
+     `public_state`, not card identities), no `combat` object created.
+     Skip the remaining steps below and return to step 0 for the next
+     round (still the same attacker, per existing single-player rule that
+     skipped rounds don't swap roles).
+   - Otherwise (`slotCount` is 1, 2, or 3 — matching
+     `computeSlotCount`'s actual range, not just "2 or 3"), proceed to
+     step 1.
 1. **Attacker selects cards** (random if NPC-style role, i.e. always random
    in PvP per existing attacker rule — attacker never freely chooses, cards
    are randomly drawn from their own available pool by their own client;
    the attacker's own client knows these identities immediately, it just
-   didn't get to pick them). Attacker's client writes the drawn cards to
-   its own `player_hands.pending_attack_queue` (private, full identities)
-   and writes only `combat.attackerSlotsTotal = N` (count) to
+   didn't get to pick them). Attacker's client **removes** the drawn cards
+   from its own `player_hands.available` and writes them into
+   `player_hands.pending_attack_queue` instead (private, full identities;
+   this exactly mirrors the existing single-player `removeCards` step in
+   `beginRound`, just split across the public/private boundary), and
+   writes only `combat.attackerSlotsTotal = slotCount` (count, 1–3) to
    `public_state`, bumps `version`.
 2. **Defender selects cards** (free choice from their own available pool,
-   as today). Defender's client writes its chosen cards to its own
+   as today). Defender's client similarly **removes** its chosen cards
+   from its own `player_hands.available` into
+   `player_hands.pending_defender_pool` (private, full identities), and
    `player_hands.pending_defender_pool` (private, full identities) and
    writes only `combat.defenderCommitted = true` to `public_state` (not
    identities), bumps `version`.
@@ -401,6 +426,22 @@ publicly vs. kept private* differs:
    client's equivalent write simply fails its version check and is
    discarded (harmless no-op, since both computed the identical result from
    the identical prior state).
+
+   **Durability against disconnects at this exact moment**: a client isn't
+   required to be online at the instant both flags become true — the
+   "apply my own `processRoundEnd`" step doesn't rely on a live transient
+   event. Instead, this is a stateless reconciliation any client performs
+   whenever it loads/reconnects: if `public_state.phase` is anything other
+   than `'round-summary'` for the current round (i.e., the round has
+   already been advanced past summary — `phase` is `'selecting'` or
+   `'game-over'`) **but** this client's own `player_hands` row still has a
+   non-null `pending_attack_queue` or `pending_defender_pool` (meaning this
+   client never got to apply its own `processRoundEnd` locally), it applies
+   `processRoundEnd` to itself immediately using its last-known pending
+   state before doing anything else. This makes the round-end application
+   durable regardless of exactly when/whether a client was connected at
+   the moment both dismiss flags flipped — a reconnecting client always
+   self-heals to a consistent state on load.
 7. If `determineWinner` finds a winner, room `status` and `winner` are set.
 
 Any write uses the optimistic-concurrency guard (`WHERE version = expected`).
