@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion'
 import type { Card, GamePhase, ResolvedDuel } from '@/lib/game/types'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PlayingCard } from './PlayingCard'
 
 interface BattleSlotsProps {
@@ -11,11 +12,10 @@ interface BattleSlotsProps {
   resolvedDuels: ResolvedDuel[]
   onSelectDefenderCard?: (cardId: string) => void
   onRevealNext?: () => void
-  onAdvanceRound?: () => void
   canRevealNext: boolean
-  canAdvanceRound: boolean
   isDefenderHuman: boolean
   phase: GamePhase
+  isRoundResultVisible?: boolean
 }
 
 export function BattleSlots({
@@ -25,54 +25,55 @@ export function BattleSlots({
   resolvedDuels,
   onSelectDefenderCard,
   onRevealNext,
-  onAdvanceRound,
   canRevealNext,
-  canAdvanceRound,
   isDefenderHuman,
   phase,
+  isRoundResultVisible = false,
 }: BattleSlotsProps) {
+  const { t } = useLanguage()
   const defenderCanAct = isDefenderHuman && Boolean(revealedCard) && Boolean(onSelectDefenderCard)
   const showRevealButton = canRevealNext && typeof onRevealNext === 'function'
-  const showAdvanceButton = canAdvanceRound && typeof onAdvanceRound === 'function'
-  const battlefieldMessage = defenderCanAct
-    ? 'Choose a defender card to answer the revealed attacker.'
+  const battlefieldMessage = isRoundResultVisible
+    ? t((messages) => messages.battleSlots.reviewRoundResult)
+    : defenderCanAct
+    ? t((messages) => messages.battleSlots.chooseDefender)
     : showRevealButton
-      ? 'Reveal the next hidden attacker to continue the battle.'
-      : showAdvanceButton
-        ? 'All clashes are settled. Advance to the next round.'
+      ? t((messages) => messages.battleSlots.revealHiddenAttacker)
+      : !revealedCard && attackerQueueCount === 0
+        ? t((messages) => messages.battleSlots.preparingRoundResult)
         : phase === 'selecting'
-          ? 'The armies are assembling their lines for the next clash.'
+          ? t((messages) => messages.battleSlots.assemblingLines)
           : isDefenderHuman
-            ? 'Waiting for the next attacker reveal.'
-            : 'NPC is defending automatically.'
+            ? t((messages) => messages.battleSlots.waitingForReveal)
+            : t((messages) => messages.battleSlots.npcDefendingAutomatically)
 
   return (
-    <section className="rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(35,49,39,0.92),rgba(20,31,23,0.96))] p-4 shadow-2xl">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <section className="rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(35,49,39,0.94),rgba(18,28,21,0.98))] p-4 shadow-2xl sm:p-5">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-military-gold">Battlefield</p>
-          <h2 className="text-xl font-semibold text-military-paper">Active duel line</h2>
+          <p className="text-xs uppercase tracking-[0.35em] text-military-gold">{t((messages) => messages.battleSlots.battlefield)}</p>
+          <h2 className="text-xl font-semibold text-military-paper sm:text-2xl">{t((messages) => messages.battleSlots.activeDuelLine)}</h2>
         </div>
-        <p className="text-sm text-military-paper/75">{battlefieldMessage}</p>
+        <p className="max-w-xl text-sm leading-6 text-military-paper/80">{battlefieldMessage}</p>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <div className="rounded-3xl border border-military-paper/10 bg-black/10 p-4">
+        <div className="rounded-3xl border border-military-paper/10 bg-black/10 p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-military-paper/90">
-              Attacker queue
+              {t((messages) => messages.battleSlots.attackerQueue)}
             </h3>
             <span className="rounded-full border border-military-gold/60 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-military-gold">
-              {attackerQueueCount} remaining
+              {t((messages) => messages.battleSlots.remaining(attackerQueueCount))}
             </span>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-dashed border-military-paper/15 bg-black/10 p-4">
               <p className="mb-4 text-xs uppercase tracking-[0.24em] text-military-paper/60">
-                Hidden column
+                {t((messages) => messages.battleSlots.hiddenColumn)}
               </p>
-              <div className="relative mx-auto h-28 w-24">
+              <div className="relative mx-auto h-24 w-20 sm:h-28 sm:w-24">
                 {Array.from({ length: Math.max(1, Math.min(attackerQueueCount, 3)) }).map((_, index) => (
                   <motion.div
                     key={`queue-${index}`}
@@ -97,23 +98,23 @@ export function BattleSlots({
 
             <div className="rounded-2xl border border-dashed border-military-paper/15 bg-black/10 p-4">
               <p className="mb-4 text-xs uppercase tracking-[0.24em] text-military-paper/60">
-                Revealed attacker
+                {t((messages) => messages.battleSlots.revealedAttacker)}
               </p>
-              <div className="flex min-h-32 items-center justify-center">
+              <div className="flex min-h-[9rem] items-center justify-center sm:min-h-[10rem]">
                 {revealedCard ? (
                   <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                     <PlayingCard card={revealedCard} size="lg" />
                   </motion.div>
                 ) : (
-                  <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-military-paper/20 px-6 py-8 text-center text-sm text-military-paper/60">
-                    <div>No attacker is revealed right now.</div>
+                  <div className="flex min-h-[9rem] w-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-military-paper/20 px-5 py-6 text-center text-sm leading-6 text-military-paper/65">
+                    <div>{t((messages) => messages.battleSlots.noRevealedAttacker)}</div>
                     {showRevealButton ? (
                       <button
                         type="button"
                         onClick={onRevealNext}
                         className="min-h-11 rounded-full border border-[#d3b26d] bg-[#d1ac56] px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-[#263225] transition hover:bg-[#dfbd6f]"
                       >
-                        Reveal next attacker
+                        {t((messages) => messages.battleSlots.revealNextAttacker)}
                       </button>
                     ) : null}
                   </div>
@@ -124,20 +125,22 @@ export function BattleSlots({
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-3xl border border-military-paper/10 bg-black/10 p-4">
+          <div className="rounded-3xl border border-military-paper/10 bg-black/10 p-4 sm:p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-military-paper/90">
-                Defender pool
+                {t((messages) => messages.battleSlots.defenderPool)}
               </h3>
               <span className="text-xs uppercase tracking-[0.2em] text-military-paper/60">
-                {defenderCanAct ? 'Tap a card to deploy' : 'Cards in reserve'}
+                {defenderCanAct
+                  ? t((messages) => messages.battleSlots.tapCardToDeploy)
+                  : t((messages) => messages.battleSlots.cardsInReserve)}
               </span>
             </div>
 
             <div className="flex flex-wrap gap-3">
               {defenderPool.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-military-paper/20 px-4 py-5 text-sm text-military-paper/60">
-                  No defender cards remain in the pool.
+                  {t((messages) => messages.battleSlots.noDefenderCards)}
                 </div>
               ) : (
                 defenderPool.map((card) => (
@@ -160,17 +163,17 @@ export function BattleSlots({
             </div>
           </div>
 
-          <div className="rounded-3xl border border-military-paper/10 bg-black/10 p-4">
+          <div className="rounded-3xl border border-military-paper/10 bg-black/10 p-4 sm:p-5">
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.25em] text-military-paper/90">
-              Resolved duels
+              {t((messages) => messages.battleSlots.resolvedDuels)}
             </h3>
 
             {resolvedDuels.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-military-paper/20 px-4 py-5 text-sm text-military-paper/60">
-                The field is still waiting for its first clash.
+                {t((messages) => messages.battleSlots.waitingForFirstClash)}
               </div>
             ) : (
-              <div className="flex flex-wrap gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {resolvedDuels.map((duel, index) => {
                   const defenderWon = duel.winner === 'defender'
                   const { attackerCard, defenderCard } = duel.duel
@@ -183,7 +186,7 @@ export function BattleSlots({
                       animate={{ opacity: 1, scale: 1 }}
                       className="rounded-2xl border border-military-paper/10 bg-[#19261c] p-3"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-center gap-2">
                         <PlayingCard card={attackerCard} size="sm" />
                         <span className="text-xl text-military-gold">⚔️</span>
                         <PlayingCard card={defenderCard} size="sm" />
@@ -196,25 +199,15 @@ export function BattleSlots({
                             : 'bg-amber-950/80 text-amber-200',
                         ].join(' ')}
                       >
-                        {defenderWon ? 'Defender held the line' : 'Attacker broke through'}
+                        {defenderWon
+                          ? t((messages) => messages.battleSlots.defenderHeldLine)
+                          : t((messages) => messages.battleSlots.attackerBrokeThrough)}
                       </div>
                     </motion.div>
                   )
                 })}
               </div>
             )}
-
-            {showAdvanceButton ? (
-              <div className="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  onClick={onAdvanceRound}
-                  className="min-h-11 rounded-full border border-[#d3b26d] bg-[#d1ac56] px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-[#263225] transition hover:bg-[#dfbd6f]"
-                >
-                  Advance round
-                </button>
-              </div>
-            ) : null}
           </div>
         </div>
       </div>

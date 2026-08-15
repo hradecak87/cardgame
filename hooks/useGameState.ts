@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { finalizeCombat, isCombatFinished, revealNextAttacker as revealNextCombatAttacker } from '@/lib/game/combat'
 import { npcSelectAttack } from '@/lib/game/npc'
 import { advanceCombat, beginRound, computeSlotCount, processRoundEnd, startNewGame as createNewGameState } from '@/lib/game/state'
 import type { Army, Card, CombatState, GamePhase, GameState, RestingCard, Side } from '@/lib/game/types'
@@ -13,6 +14,12 @@ type AutoAdvanceAction =
   | 'reveal-next-attacker'
   | 'resolve-npc-defense'
   | 'finish-round'
+
+export interface RoundResultState {
+  capturedCards: Card[]
+  lostCards: Card[]
+  nextState: GameState
+}
 
 const HYDRATION_PLACEHOLDER_STATE: GameState = {
   player: { available: [], resting: [] },
@@ -137,7 +144,83 @@ function getDefenderSide(attackerSide: Side): Side {
   return attackerSide === 'player' ? 'npc' : 'player'
 }
 
-export function getAutoAdvanceAction(state: GameState): AutoAdvanceAction | null {
+function buildRoundResultCards(state: GameState): Pick<RoundResultState, 'capturedCards' | 'lostCards'> {
+  if (!state.combat) {
+    return {
+      capturedCards: [],
+      lostCards: [],
+    }
+  }
+
+  const capturedCards =
+    state.attackerSide === 'player'
+      ? state.combat.resolvedDuels
+          .filter((entry) => entry.winner === 'attacker')
+          .map((entry) => entry.duel.defenderCard)
+      : state.combat.resolvedDuels
+          .filter((entry) => entry.winner === 'defender')
+          .map((entry) => entry.duel.attackerCard)
+
+  const lostCards =
+    state.attackerSide === 'player'
+      ? state.combat.resolvedDuels
+          .filter((entry) => entry.winner === 'defender')
+          .map((entry) => entry.duel.attackerCard)
+      : state.combat.resolvedDuels
+          .filter((entry) => entry.winner === 'attacker')
+          .map((entry) => entry.duel.defenderCard)
+
+  return {
+    capturedCards,
+    lostCards,
+  }
+}
+
+export function prepareRoundResult(state: GameState): { displayState: GameState; roundResult: RoundResultState | null } {
+  if (state.phase !== 'combat' || !state.combat) {
+    return {
+      displayState: state,
+      roundResult: null,
+    }
+  }
+
+  const finalizedCombat = finalizeCombat(state.combat)
+  const displayState =
+    finalizedCombat === state.combat
+      ? state
+      : {
+          ...state,
+          combat: finalizedCombat,
+        }
+
+  if (!isCombatFinished(finalizedCombat) || finalizedCombat.resolvedDuels.length === 0) {
+    return {
+      displayState,
+      roundResult: null,
+    }
+  }
+
+  return {
+    displayState,
+    roundResult: {
+      ...buildRoundResultCards(displayState),
+      nextState: processRoundEnd(displayState),
+    },
+  }
+}
+
+export function dismissRoundResult(roundResult: RoundResultState): GameState {
+  return roundResult.nextState
+}
+
+export function getAutoAdvanceAction(
+  state: GameState,
+  roundResult: RoundResultState | null = null,
+): AutoAdvanceAction | null {
+  if (roundResult) {
+    return null
+  }
+
   if (state.phase === 'game-over') {
     return null
   }
@@ -156,6 +239,10 @@ export function getAutoAdvanceAction(state: GameState): AutoAdvanceAction | null
 
   if (state.phase !== 'combat' || !state.combat) {
     return null
+  }
+
+  if (!state.combat.revealedCard && state.combat.attackerQueue.length === 0) {
+    return 'finish-round'
   }
 
   const defenderSide = getDefenderSide(state.attackerSide)
@@ -187,15 +274,17 @@ function buildNpcDefenderSelection(state: GameState, rng: () => number): string[
 
 export function useGameState(): {
   state: GameState
+  roundResult: RoundResultState | null
   actions: {
     startNewGame: () => void
     confirmDefenderSelection: (selectedCardIds: string[]) => void
     revealNextAttacker: () => void
     selectDefenderCard: (cardId: string) => void
-    advanceRound: () => void
+    dismissRoundResult: () => void
   }
 } {
   const [state, setState] = useState<GameState>(HYDRATION_PLACEHOLDER_STATE)
+  const [roundResult, setRoundResult] = useState<RoundResultState | null>(null)
   const [isReady, setIsReady] = useState(false)
   const timeoutRef = useRef<number | null>(null)
 
@@ -213,6 +302,7 @@ export function useGameState(): {
     }
 
     replaceState(createNewGameState())
+    setRoundResult(null)
     setIsReady(true)
   }, [replaceState])
 
@@ -224,7 +314,16 @@ export function useGameState(): {
   )
 
   const revealNextAttacker = useCallback(() => {
-    updateState((currentState) => advanceCombat(currentState))
+    updateState((currentState) => {
+      if (currentState.phase !== 'combat' || !currentState.combat) {
+        return currentState
+      }
+
+      return {
+        ...currentState,
+        combat: revealNextCombatAttacker(currentState.combat),
+      }
+    })
   }, [updateState])
 
   const selectDefenderCard = useCallback(
@@ -234,13 +333,19 @@ export function useGameState(): {
     [updateState],
   )
 
-  const advanceRound = useCallback(() => {
-    updateState((currentState) => processRoundEnd(currentState))
-  }, [updateState])
+  const handleDismissRoundResult = useCallback(() => {
+    if (!roundResult) {
+      return
+    }
+
+    replaceState(dismissRoundResult(roundResult))
+    setRoundResult(null)
+  }, [replaceState, roundResult])
 
   useEffect(() => {
     const storedState = loadStoredGameState(window.localStorage.getItem(STORAGE_KEY))
     replaceState(storedState ?? createNewGameState())
+    setRoundResult(null)
     setIsReady(true)
   }, [replaceState])
 
@@ -257,14 +362,14 @@ export function useGameState(): {
       return
     }
 
-    const action = getAutoAdvanceAction(state)
+    const action = getAutoAdvanceAction(state, roundResult)
 
     if (!action) {
       return
     }
 
     const delay =
-      action === 'finish-round' ? 850 : action === 'resolve-npc-defense' ? 700 : 650
+      action === 'finish-round' ? 950 : action === 'resolve-npc-defense' ? 1000 : 850
 
     timeoutRef.current = window.setTimeout(() => {
       if (action === 'skip-empty-round') {
@@ -289,7 +394,9 @@ export function useGameState(): {
         return
       }
 
-      advanceRound()
+      const { displayState, roundResult: nextRoundResult } = prepareRoundResult(state)
+      replaceState(displayState)
+      setRoundResult(nextRoundResult)
     }, delay)
 
     return () => {
@@ -298,16 +405,17 @@ export function useGameState(): {
         timeoutRef.current = null
       }
     }
-  }, [advanceRound, isReady, revealNextAttacker, state, updateState])
+  }, [isReady, replaceState, revealNextAttacker, roundResult, state, updateState])
 
   return {
     state,
+    roundResult,
     actions: {
       startNewGame,
       confirmDefenderSelection,
       revealNextAttacker,
       selectDefenderCard,
-      advanceRound,
+      dismissRoundResult: handleDismissRoundResult,
     },
   }
 }

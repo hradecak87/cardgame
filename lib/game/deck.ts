@@ -40,18 +40,31 @@ export function createDeck(): Card[] {
 }
 
 /**
- * Shuffles a supplied deck and deals two 16-card starting armies.
+ * Shuffles a supplied deck and deals two 16-card starting armies with 2 aces per side.
  */
 export function dealHands(deck: Card[], rng: () => number = Math.random): { player: Army; npc: Army } {
-  const shuffled = shuffleCards(deck, rng)
+  const aces = deck.filter((card) => card.rank === 'A')
+  const nonAces = deck.filter((card) => card.rank !== 'A')
+
+  const shuffledAces = shuffleCards(aces, rng)
+  const shuffledNonAces = shuffleCards(nonAces, rng)
+
+  const playerCards = shuffleCards(
+    [...shuffledAces.slice(0, 2), ...shuffledNonAces.slice(0, 14)],
+    rng,
+  )
+  const npcCards = shuffleCards(
+    [...shuffledAces.slice(2, 4), ...shuffledNonAces.slice(14, 28)],
+    rng,
+  )
 
   return {
     player: {
-      available: shuffled.slice(0, 16),
+      available: playerCards,
       resting: [],
     },
     npc: {
-      available: shuffled.slice(16, 32),
+      available: npcCards,
       resting: [],
     },
   }
