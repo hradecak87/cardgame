@@ -290,7 +290,7 @@ export function useMultiplayerGameState(): {
       const dealRoom = async () => {
         try {
           const supabase = getSupabaseClient()
-          await supabase.rpc('deal_room', { room_id: room.roomId })
+          await supabase.rpc('deal_room', { p_room_id: room.roomId })
         } catch (error) {
           console.error('Error dealing room:', error)
           // Retry after 5s
@@ -837,11 +837,12 @@ export function useMultiplayerGameState(): {
           return { ok: false, reason: 'No session' }
         }
 
-        // Call join_room RPC
+        // Call join_room RPC. The DB function signature (migration 0002) is
+        // join_room(p_code text, p_nickname text) — it derives the joiner's
+        // uid itself via auth.uid(), it isn't passed as a parameter.
         const result = await supabase.rpc('join_room', {
-          code,
-          player_b_uid: playerUid,
-          player_b_nickname: nickname,
+          p_code: code,
+          p_nickname: nickname,
         })
 
         if (result.error) {
