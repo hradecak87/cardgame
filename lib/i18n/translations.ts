@@ -107,6 +107,37 @@ export interface Translations {
     faceDownAriaLabel: string
     cardAriaLabel: (rank: string, suit: string, power: number) => string
   }
+  multiplayer: {
+    mainMenu: {
+      singlePlayer: string
+      multiplayerOnline: string
+    }
+    createRoom: {
+      heading: string
+      nicknameLabel: string
+      nicknameInputPlaceholder: string
+      createButton: string
+      waitingMessage: string
+      roomCode: string
+      copyCode: string
+      copiedToClipboard: string
+    }
+    joinRoom: {
+      heading: string
+      nicknameLabel: string
+      codeLabel: string
+      nicknameInputPlaceholder: string
+      codeInputPlaceholder: string
+      joinButton: string
+      errorRoomNotFound: string
+      errorRoomFull: string
+      errorAlreadyStarted: string
+    }
+    connectionStatus: {
+      peerDisconnected: string
+      reconnecting: string
+    }
+  }
 }
 
 const en: Translations = {
@@ -248,6 +279,37 @@ const en: Translations = {
     faceDownAriaLabel: 'Face-down playing card',
     cardAriaLabel: (rank, suit, power) => `${rank} of ${suit}, power ${power}`,
   },
+  multiplayer: {
+    mainMenu: {
+      singlePlayer: 'Play vs computer',
+      multiplayerOnline: 'Play online with a friend',
+    },
+    createRoom: {
+      heading: 'Create a room',
+      nicknameLabel: 'Your nickname',
+      nicknameInputPlaceholder: 'Enter your nickname',
+      createButton: 'Založit',
+      waitingMessage: 'čekání na soupeře…',
+      roomCode: 'Room code',
+      copyCode: 'Copy code',
+      copiedToClipboard: 'Copied to clipboard!',
+    },
+    joinRoom: {
+      heading: 'Join a room',
+      nicknameLabel: 'Your nickname',
+      codeLabel: 'Room code',
+      nicknameInputPlaceholder: 'Enter your nickname',
+      codeInputPlaceholder: '00000',
+      joinButton: 'Připojit',
+      errorRoomNotFound: 'Room not found',
+      errorRoomFull: 'Room is full',
+      errorAlreadyStarted: 'Game has already started',
+    },
+    connectionStatus: {
+      peerDisconnected: 'Opponent disconnected',
+      reconnecting: 'reconnecting…',
+    },
+  },
 }
 
 const cs: Translations = {
@@ -386,6 +448,37 @@ const cs: Translations = {
     backLabelBottom: 'garda',
     faceDownAriaLabel: 'Karta lícem dolů',
     cardAriaLabel: (rank, suit, power) => `${rank} ${suit}, síla ${power}`,
+  },
+  multiplayer: {
+    mainMenu: {
+      singlePlayer: 'Hrát proti počítači',
+      multiplayerOnline: 'Hrát s kamarádem online',
+    },
+    createRoom: {
+      heading: 'Vytvoř místnost',
+      nicknameLabel: 'Tvoje přezdívka',
+      nicknameInputPlaceholder: 'Zadej svou přezdívku',
+      createButton: 'Založit',
+      waitingMessage: 'čekání na soupeře…',
+      roomCode: 'Kód místnosti',
+      copyCode: 'Kopírovat kód',
+      copiedToClipboard: 'Zkopírováno do schránky!',
+    },
+    joinRoom: {
+      heading: 'Připoj se k místnosti',
+      nicknameLabel: 'Tvoje přezdívka',
+      codeLabel: 'Kód místnosti',
+      nicknameInputPlaceholder: 'Zadej svou přezdívku',
+      codeInputPlaceholder: '00000',
+      joinButton: 'Připojit',
+      errorRoomNotFound: 'Místnost nenalezena',
+      errorRoomFull: 'Místnost je plná',
+      errorAlreadyStarted: 'Hra již byla zahájena',
+    },
+    connectionStatus: {
+      peerDisconnected: 'Soupeř se odpojil',
+      reconnecting: 'znovupřipojování…',
+    },
   },
 }
 

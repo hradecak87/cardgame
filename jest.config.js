@@ -17,4 +17,5 @@ module.exports = {
   },
   testPathIgnorePatterns: ['/node_modules/', '/.next/'],
   modulePathIgnorePatterns: ['<rootDir>/.next/'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
 }

@@ -13,6 +13,7 @@ import {
   redoRound,
   startNewGame as createNewGameState,
 } from '@/lib/game/state'
+import { buildRoundResultCards } from '@/lib/game/roundResult'
 import type {
   Army,
   Card,
@@ -237,38 +238,6 @@ export function hydrateGameSession(
 
 function getDefenderSide(attackerSide: Side): Side {
   return attackerSide === 'player' ? 'npc' : 'player'
-}
-
-function buildRoundResultCards(state: GameState): Pick<RoundResultState, 'capturedCards' | 'lostCards'> {
-  if (!state.combat) {
-    return {
-      capturedCards: [],
-      lostCards: [],
-    }
-  }
-
-  const capturedCards =
-    state.attackerSide === 'player'
-      ? state.combat.resolvedDuels
-          .filter((entry) => entry.winner === 'attacker')
-          .map((entry) => entry.duel.defenderCard)
-      : state.combat.resolvedDuels
-          .filter((entry) => entry.winner === 'defender')
-          .map((entry) => entry.duel.attackerCard)
-
-  const lostCards =
-    state.attackerSide === 'player'
-      ? state.combat.resolvedDuels
-          .filter((entry) => entry.winner === 'defender')
-          .map((entry) => entry.duel.attackerCard)
-      : state.combat.resolvedDuels
-          .filter((entry) => entry.winner === 'attacker')
-          .map((entry) => entry.duel.defenderCard)
-
-  return {
-    capturedCards,
-    lostCards,
-  }
 }
 
 export function prepareRoundResult(state: GameState): { displayState: GameState; roundResult: RoundResultState | null } {

@@ -1,12 +1,21 @@
 'use client'
 
+import { useState } from 'react'
 import { ActionHighlight } from '@/components/game/ActionHighlight'
 import { GameBoard } from '@/components/game/GameBoard'
 import { getActivePlayerAction } from '@/components/game/activePlayerAction'
+import { MainMenu } from '@/components/multiplayer/MainMenu'
+import { CreateRoomScreen } from '@/components/multiplayer/CreateRoomScreen'
+import { JoinRoomScreen } from '@/components/multiplayer/JoinRoomScreen'
+import { ConnectionStatusBanner } from '@/components/multiplayer/ConnectionStatusBanner'
 import { useGameState } from '@/hooks/useGameState'
+import { useMultiplayerGameState } from '@/hooks/useMultiplayerGameState'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { computeSlotCount } from '@/lib/game/state'
+import { buildRoundResultCards } from '@/lib/game/roundResult'
 import type { Difficulty } from '@/lib/game/types'
+
+type GameMode = 'menu' | 'single-player' | 'multiplayer-create' | 'multiplayer-join' | 'multiplayer-game'
 
 const DIFFICULTY_OPTIONS: Array<{
   value: Difficulty
@@ -96,7 +105,10 @@ function DifficultyPicker({
 
 export default function HomePage() {
   const { state, roundResult, selectedDifficulty, isDifficultyPickerOpen, isHydrated, actions } = useGameState()
+  const multiplayerState = useMultiplayerGameState()
   const { language, setLanguage, t } = useLanguage()
+  const [gameMode, setGameMode] = useState<GameMode>('menu')
+
   const totalCards = state.player.available.length + state.player.resting.length + state.npc.available.length + state.npc.resting.length
   const playerRole = state.attackerSide === 'player' ? 'attacker' : 'defender'
   const isDefenderHuman = state.attackerSide === 'npc'
@@ -118,6 +130,11 @@ export default function HomePage() {
     canRevealNext,
   })
 
+  // Transition to multiplayer-game when room is playing
+  if ((gameMode === 'multiplayer-create' || gameMode === 'multiplayer-join') && multiplayerState.roomStatus === 'playing') {
+    setGameMode('multiplayer-game')
+  }
+
   if (!isHydrated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
@@ -128,7 +145,62 @@ export default function HomePage() {
     )
   }
 
-  if (totalCards === 0 && isDifficultyPickerOpen) {
+  // Menu mode
+  if (gameMode === 'menu') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
+        <div className="w-full max-w-3xl">
+          <MainMenu
+            onSelectSinglePlayer={() => setGameMode('single-player')}
+            onSelectMultiplayer={() => setGameMode('multiplayer-create')}
+          />
+        </div>
+      </main>
+    )
+  }
+
+  // Multiplayer create room mode
+  if (gameMode === 'multiplayer-create') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
+        <div className="w-full max-w-3xl">
+          <CreateRoomScreen
+            onCreateRoom={async (nickname) => {
+              const result = await multiplayerState.actions.createRoom(nickname)
+              if (!result.ok) {
+                console.error('Failed to create room:', result.reason)
+              }
+            }}
+            roomCode={multiplayerState.roomCode}
+            roomStatus={multiplayerState.roomStatus}
+          />
+        </div>
+      </main>
+    )
+  }
+
+  // Multiplayer join room mode  
+  if (gameMode === 'multiplayer-join') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
+        <div className="w-full max-w-3xl">
+          <JoinRoomScreen
+            onJoinRoom={async (code, nickname) => {
+              const result = await multiplayerState.actions.joinRoom(code, nickname)
+              if (result.ok) {
+                return { ok: true }
+              } else {
+                return { ok: false, reason: result.reason || 'Failed to join room' }
+              }
+            }}
+          />
+        </div>
+      </main>
+    )
+  }
+
+  // Single-player mode
+  if (gameMode === 'single-player' && totalCards === 0 && isDifficultyPickerOpen) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
         <div className="w-full max-w-3xl">
@@ -143,6 +215,137 @@ export default function HomePage() {
     )
   }
 
+  // Multiplayer game mode
+  if (gameMode === 'multiplayer-game' && multiplayerState.state) {
+    const mpState = multiplayerState.state
+    const mpRoundResult =
+      multiplayerState.publicPhase === 'round-summary' && mpState.combat
+        ? {
+            capturedCards: buildRoundResultCards(mpState).capturedCards,
+            lostCards: buildRoundResultCards(mpState).lostCards,
+            canRedoRound: false,
+            endsGame: false,
+          }
+        : null
+
+    // Multiplayer-specific mappings
+    const mpIsDefenderHuman = mpState.attackerSide !== 'player'
+    const mpSelectionRequiredCount = mpState.phase === 'selecting' ? computeSlotCount(mpState) : 0
+    const mpCombat = mpState.combat
+    const mpCanRevealNext =
+      !mpRoundResult &&
+      mpState.phase === 'combat' &&
+      mpState.attackerSide === 'player' &&
+      !mpCombat?.revealedCard &&
+      Boolean(mpCombat?.attackerQueue.length)
+
+    return (
+      <div className="relative">
+        <div className="absolute left-0 right-0 top-0 z-10 mx-auto flex w-full max-w-7xl flex-col gap-3 px-3 pt-3 sm:px-5 lg:px-8">
+          <div className="flex justify-between items-center gap-3">
+            <ConnectionStatusBanner
+              isPeerConnected={multiplayerState.isPeerConnected}
+              message={t((msg) => msg.multiplayer.connectionStatus.peerDisconnected)}
+            />
+            <div className="flex items-center gap-1 rounded-full border border-military-paper/20 bg-black/30 p-1 text-xs font-bold uppercase tracking-[0.18em] text-military-paper shadow-lg">
+              <span className="px-2 text-military-paper/70">{t((messages) => messages.languageSwitcher.label)}</span>
+              {(['en', 'cs'] as const).map((option) => {
+                const label =
+                  option === 'en'
+                    ? t((messages) => messages.languageSwitcher.english)
+                    : t((messages) => messages.languageSwitcher.czech)
+
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setLanguage(option)}
+                    aria-pressed={language === option}
+                    className={[
+                      'min-h-9 rounded-full px-3 py-2 transition',
+                      language === option ? 'bg-[#d1ac56] text-[#263225]' : 'text-military-paper/85 hover:bg-black/25',
+                    ].join(' ')}
+                  >
+                    {option.toUpperCase()}
+                    <span className="sr-only">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                multiplayerState.actions.leaveRoom()
+                setGameMode('menu')
+              }}
+              className="min-h-11 rounded-full border border-military-paper/20 bg-black/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper shadow-lg transition hover:bg-black/40"
+            >
+              Back to menu
+            </button>
+          </div>
+
+          {mpState.phase === 'game-over' ? (
+            <ActionHighlight active={false} className="rounded-[1.5rem] border border-[#d3b26d]">
+              <section className="bg-[#f0e2ba]/95 px-5 py-4 text-[#2d2414] shadow-xl">
+                <p className="text-xs font-bold uppercase tracking-[0.28em] text-[#7a5c22]">{t((messages) => messages.app.gameOver)}</p>
+                <h2 className="mt-1 text-xl font-semibold sm:text-2xl">
+                  {mpState.winner === 'player'
+                    ? 'You win!'
+                    : 'Your opponent wins!'}
+                </h2>
+              </section>
+            </ActionHighlight>
+          ) : null}
+        </div>
+
+        <GameBoard
+          playerArmy={mpState.player}
+          opponentArmy={mpState.npc}
+          attackerQueueCount={mpCombat?.attackerQueue.length ?? 0}
+          revealedCard={mpCombat?.revealedCard ?? null}
+          defenderPool={mpCombat?.defenderPool ?? []}
+          resolvedDuels={mpCombat?.resolvedDuels ?? []}
+          selectionAvailableCards={mpState.player.available}
+          selectionRequiredCount={mpSelectionRequiredCount}
+          isDefenderHuman={mpIsDefenderHuman}
+          playerRole={mpState.attackerSide === 'player' ? 'attacker' : 'defender'}
+          phase={mpState.phase}
+          playerName={multiplayerState.ownNickname || 'You'}
+          opponentName={multiplayerState.opponentNickname || 'Opponent'}
+          roundLabel={`${multiplayerState.ownNickname || 'You'} ${mpState.attackerSide === 'player' ? 'attacks' : 'defends'}`}
+          phaseLabel={t((messages) => messages.app.phaseLabel(mpState.phase, Boolean(mpRoundResult)))}
+          statusMessage={
+            mpRoundResult
+              ? t((messages) => messages.app.status.roundResult)
+              : mpState.phase === 'game-over'
+                ? 'Game over'
+                : mpState.phase === 'selecting'
+                  ? mpIsDefenderHuman
+                    ? `Select ${mpSelectionRequiredCount} defender cards`
+                    : 'Opponent is attacking'
+                  : mpIsDefenderHuman
+                    ? 'Choose a defender'
+                    : 'Opponent is defending'
+          }
+          difficultyLabel="Online"
+          roundResult={mpRoundResult}
+          onSelectDefenderCard={multiplayerState.actions.selectDefenderCard}
+          onConfirmSelection={(cardIds) => multiplayerState.actions.confirmDefenderSelection(cardIds)}
+          onRevealNext={multiplayerState.actions.revealNextAttacker}
+          onRedoRound={() => {}}
+          onDismissRoundResult={multiplayerState.actions.dismissRoundResult}
+          canRevealNext={mpCanRevealNext}
+          highlightPlayerHandSelector={false}
+          highlightDefenderPool={false}
+          highlightRevealNext={false}
+          highlightRoundResult={Boolean(mpRoundResult)}
+        />
+      </div>
+    )
+  }
+
+  // Single-player game mode (default)
   const statusMessage =
     roundResult
       ? t((messages) => messages.app.status.roundResult)
@@ -262,7 +465,7 @@ export default function HomePage() {
         highlightRoundResult={activePlayerAction === 'round-result'}
       />
 
-      {isDifficultyPickerOpen ? (
+      {isDifficultyPickerOpen && gameMode === 'single-player' ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-3 py-6 backdrop-blur-sm sm:px-5 lg:px-8">
           <div className="w-full max-w-3xl">
             <DifficultyPicker
