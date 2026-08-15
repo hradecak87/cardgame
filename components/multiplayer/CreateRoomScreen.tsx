@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 interface CreateRoomScreenProps {
-  onCreateRoom: (nickname: string) => Promise<void>
+  onCreateRoom: (nickname: string) => Promise<{ ok: boolean; reason?: string }>
   roomCode: string | null
   roomStatus: string | null
 }
@@ -14,16 +14,22 @@ export function CreateRoomScreen({ onCreateRoom, roomCode, roomStatus }: CreateR
   const [nickname, setNickname] = useState('')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
 
   const handleCreate = async () => {
     if (!nickname.trim()) {
       return
     }
     setLoading(true)
+    setError('')
     try {
-      await onCreateRoom(nickname)
-    } catch (error) {
-      console.error('Error creating room:', error)
+      const result = await onCreateRoom(nickname)
+      if (!result.ok) {
+        setError(result.reason || 'Failed to create room')
+      }
+    } catch (err) {
+      setError('An error occurred')
+      console.error('Error creating room:', err)
     } finally {
       setLoading(false)
     }
@@ -78,6 +84,8 @@ export function CreateRoomScreen({ onCreateRoom, roomCode, roomStatus }: CreateR
             className="mt-2 w-full rounded-lg border border-military-paper/20 bg-black/25 px-4 py-2 text-military-paper placeholder-military-paper/40 focus:outline-none"
           />
         </div>
+
+        {error && <p className="text-sm text-red-400">{error}</p>}
       </div>
 
       <div className="mt-6 flex justify-end gap-4">

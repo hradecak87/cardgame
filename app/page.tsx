@@ -169,7 +169,9 @@ export default function HomePage() {
               const result = await multiplayerState.actions.createRoom(nickname)
               if (!result.ok) {
                 console.error('Failed to create room:', result.reason)
+                return { ok: false, reason: result.reason }
               }
+              return { ok: true }
             }}
             roomCode={multiplayerState.roomCode}
             roomStatus={multiplayerState.roomStatus}
