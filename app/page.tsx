@@ -16,7 +16,7 @@ const DIFFICULTY_OPTIONS: Array<{
   {
     value: 'easy',
     label: 'Easy / Lehká',
-    summary: '2 aces for the player, 2-round rest, one lifetime duel redo.',
+    summary: '2 aces for the player, 2-round rest, one lifetime round redo.',
   },
   {
     value: 'normal',
@@ -111,7 +111,6 @@ export default function HomePage() {
   const activePlayerAction = getActivePlayerAction({
     isDifficultyPickerOpen,
     roundResultVisible: Boolean(roundResult),
-    pendingDuelRedoVisible: Boolean(state.pendingDuelRedo),
     phase: state.phase,
     isDefenderHuman,
     selectionRequiredCount,
@@ -246,6 +245,7 @@ export default function HomePage() {
             ? {
                 capturedCards: roundResult.capturedCards,
                 lostCards: roundResult.lostCards,
+                canRedoRound: roundResult.canRedoRound,
                 endsGame: roundResult.nextState.phase === 'game-over',
               }
             : null
@@ -253,15 +253,12 @@ export default function HomePage() {
         onSelectDefenderCard={actions.selectDefenderCard}
         onConfirmSelection={actions.confirmDefenderSelection}
         onRevealNext={actions.revealNextAttacker}
-        pendingDuelRedo={state.pendingDuelRedo}
-        onRedoPendingDuel={actions.redoPendingDuel}
-        onSkipPendingDuelRedo={actions.skipPendingDuelRedo}
+        onRedoRound={actions.redoRound}
         onDismissRoundResult={actions.dismissRoundResult}
         canRevealNext={canRevealNext}
         highlightPlayerHandSelector={activePlayerAction === 'player-hand-selector'}
         highlightDefenderPool={activePlayerAction === 'defender-pool'}
         highlightRevealNext={activePlayerAction === 'reveal-next'}
-        highlightPendingDuelRedo={activePlayerAction === 'pending-duel-redo'}
         highlightRoundResult={activePlayerAction === 'round-result'}
       />
 

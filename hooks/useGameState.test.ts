@@ -7,9 +7,21 @@ import {
   loadStoredDifficulty,
   loadStoredGameState,
   prepareRoundResult,
+  redoRoundResult,
   startGameWithDifficulty,
 } from './useGameState'
-import type { Army, Card, GameState } from '@/lib/game/types'
+import type { Army, Card, GameState, Side } from '@/lib/game/types'
+
+type RoundSnapshot = {
+  player: Army
+  npc: Army
+  attackerSide: Side
+}
+
+type TestGameState = GameState & {
+  roundRedoAvailable?: boolean
+  roundStartSnapshot?: RoundSnapshot | null
+}
 
 function createCard(id: string, power: number): Card {
   return {
@@ -24,7 +36,7 @@ function createArmy(available: Card[], resting: Army['resting'] = []): Army {
   return { available, resting }
 }
 
-function createState(overrides: Partial<GameState> = {}): GameState {
+function createState(overrides: Partial<TestGameState> = {}): TestGameState {
   return {
     player: createArmy([]),
     npc: createArmy([]),
@@ -33,8 +45,8 @@ function createState(overrides: Partial<GameState> = {}): GameState {
     combat: null,
     winner: null,
     difficulty: 'easy',
-    duelRedosRemaining: 1,
-    pendingDuelRedo: null,
+    roundRedoAvailable: true,
+    roundStartSnapshot: null,
     ...overrides,
   }
 }
@@ -74,8 +86,8 @@ describe('useGameState helpers', () => {
       player: createArmy([]),
       npc: createArmy([]),
       difficulty: 'easy',
-      duelRedosRemaining: 1,
-      pendingDuelRedo: null,
+      roundRedoAvailable: true,
+      roundStartSnapshot: null,
     })
 
     const hydrated = hydrateGameSession(JSON.stringify(placeholderState), 'normal')
@@ -87,10 +99,10 @@ describe('useGameState helpers', () => {
   })
 
   test('starting a game with a chosen difficulty applies that deal distribution', () => {
-    const state = startGameWithDifficulty('expert', () => 0)
+    const state = startGameWithDifficulty('expert', () => 0) as TestGameState
 
     expect(state.difficulty).toBe('expert')
-    expect(state.duelRedosRemaining).toBe(0)
+    expect(state.roundRedoAvailable).toBe(false)
     expect(state.player.available.filter((card) => card.rank === 'A')).toHaveLength(1)
     expect(state.npc.available.filter((card) => card.rank === 'A')).toHaveLength(3)
   })
@@ -208,6 +220,7 @@ describe('useGameState helpers', () => {
     expect(roundResult).not.toBeNull()
     expect(roundResult?.capturedCards).toEqual([defenderCard])
     expect(roundResult?.lostCards).toEqual([])
+    expect(roundResult?.canRedoRound).toBe(false)
     expect(roundResult?.nextState.phase).toBe('selecting')
     expect(roundResult?.nextState.attackerSide).toBe('npc')
     expect(roundResult?.nextState.player.resting.map((entry) => entry.card.id)).toEqual([
@@ -253,6 +266,98 @@ describe('useGameState helpers', () => {
     ])
   })
 
+  test('round result exposes a redo option only when the player lost at least one duel on easy', () => {
+    const playerCard = createCard('player-attacker', 2)
+    const npcCard = createCard('npc-defender', 7)
+    const roundStartSnapshot: RoundSnapshot = {
+      attackerSide: 'player',
+      player: createArmy([playerCard, createCard('player-reserve', 5)]),
+      npc: createArmy([npcCard, createCard('npc-reserve', 4)]),
+    }
+    const finishedCombatState = createState({
+      attackerSide: 'player',
+      phase: 'combat',
+      difficulty: 'easy',
+      roundRedoAvailable: true,
+      roundStartSnapshot,
+      player: createArmy([createCard('player-reserve', 5)]),
+      npc: createArmy([createCard('npc-reserve', 4)]),
+      combat: {
+        attackerQueue: [],
+        revealedCard: null,
+        defenderPool: [],
+        pendingTies: [],
+        resolvedDuels: [
+          {
+            duel: {
+              attackerCard: playerCard,
+              defenderCard: npcCard,
+            },
+            winner: 'defender',
+          },
+        ],
+      },
+    })
+
+    const { roundResult } = prepareRoundResult(finishedCombatState)
+
+    expect(roundResult?.lostCards).toEqual([playerCard])
+    expect(roundResult?.canRedoRound).toBe(true)
+
+    const unavailable = prepareRoundResult({
+      ...finishedCombatState,
+      difficulty: 'expert',
+      roundRedoAvailable: false,
+    } as TestGameState)
+
+    expect(unavailable.roundResult?.canRedoRound).toBe(false)
+  })
+
+  test('redoRoundResult resets the same round back to selection and consumes the one-time redo', () => {
+    const playerDefender = createCard('player-defender', 3)
+    const npcOriginal = createCard('npc-original', 7)
+    const npcReplacement = createCard('npc-replacement', 2)
+    const roundStartSnapshot: RoundSnapshot = {
+      attackerSide: 'npc',
+      player: createArmy([playerDefender]),
+      npc: createArmy([npcOriginal, npcReplacement]),
+    }
+    const finishedCombatState = createState({
+      attackerSide: 'npc',
+      phase: 'combat',
+      difficulty: 'easy',
+      roundRedoAvailable: true,
+      roundStartSnapshot,
+      player: createArmy([]),
+      npc: createArmy([npcReplacement]),
+      combat: {
+        attackerQueue: [],
+        revealedCard: null,
+        defenderPool: [],
+        pendingTies: [],
+        resolvedDuels: [
+          {
+            duel: {
+              attackerCard: npcOriginal,
+              defenderCard: playerDefender,
+            },
+            winner: 'attacker',
+          },
+        ],
+      },
+    })
+
+    const { roundResult } = prepareRoundResult(finishedCombatState)
+    const redoneState = redoRoundResult(roundResult!)
+
+    expect(redoneState.phase).toBe('selecting')
+    expect(redoneState.attackerSide).toBe('npc')
+    expect(redoneState.player).toEqual(roundStartSnapshot.player)
+    expect(redoneState.npc).toEqual(roundStartSnapshot.npc)
+    expect((redoneState as TestGameState).roundRedoAvailable).toBe(false)
+    expect((redoneState as TestGameState).roundStartSnapshot).toBeNull()
+  })
+
   test('prepareRoundResult uses the game difficulty when sending cards to rest', () => {
     const attackerCard = createCard('attacker', 8)
     const defenderCard = createCard('defender', 2)
@@ -260,7 +365,7 @@ describe('useGameState helpers', () => {
       attackerSide: 'player',
       phase: 'combat',
       difficulty: 'expert',
-      duelRedosRemaining: 0,
+      roundRedoAvailable: false,
       player: createArmy([]),
       npc: createArmy([]),
       combat: {
@@ -288,54 +393,19 @@ describe('useGameState helpers', () => {
     ])
   })
 
-  test('auto advance pauses while an easy redo prompt is visible', () => {
-    const attackerCard = createCard('attacker', 8)
-    const defenderCard = createCard('defender', 2)
-    const state = createState({
-      phase: 'combat',
-      combat: {
-        attackerQueue: [],
-        revealedCard: null,
-        defenderPool: [],
-        pendingTies: [],
-        resolvedDuels: [
-          {
-            duel: {
-              attackerCard,
-              defenderCard,
-            },
-            winner: 'attacker',
-          },
-        ],
-      },
-      pendingDuelRedo: {
-        duel: {
-          duel: {
-            attackerCard,
-            defenderCard,
-          },
-          winner: 'attacker',
-        },
-      },
-    })
-
-    expect(getAutoAdvanceAction(state)).toBeNull()
-  })
-
-  test('rejects stored game state with an invalid pending duel redo payload', () => {
+  test('rejects stored game state with an invalid round snapshot payload', () => {
     const invalidRedoState = {
       ...createState({
         player: createArmy([createCard('p1', 4)]),
         npc: createArmy([createCard('n1', 6)]),
       }),
-      pendingDuelRedo: {
-        duel: {
-          duel: {
-            attackerCard: { id: 'broken' },
-            defenderCard: createCard('d1', 2),
-          },
-          winner: 'attacker',
+      roundStartSnapshot: {
+        attackerSide: 'player',
+        player: {
+          available: [{ id: 'broken' }],
+          resting: [],
         },
+        npc: createArmy([createCard('n2', 3)]),
       },
     }
 

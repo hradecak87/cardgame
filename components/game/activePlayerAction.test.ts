@@ -5,7 +5,6 @@ function getActiveAction(overrides: Partial<Parameters<typeof getActivePlayerAct
   return getActivePlayerAction({
     isDifficultyPickerOpen: false,
     roundResultVisible: false,
-    pendingDuelRedoVisible: false,
     phase: 'combat',
     isDefenderHuman: false,
     selectionRequiredCount: 0,
@@ -59,17 +58,6 @@ describe('getActivePlayerAction', () => {
         hasRevealedCard: true,
       }),
     ).toBe('round-result')
-  })
-
-  test('highlights the pending redo prompt when it is visible', () => {
-    expect(
-      getActiveAction({
-        pendingDuelRedoVisible: true,
-        phase: 'combat',
-        isDefenderHuman: true,
-        hasRevealedCard: true,
-      }),
-    ).toBe('pending-duel-redo')
   })
 
   test.each<GamePhase>(['game-over'])('can highlight the terminal banner during %s', (phase) => {

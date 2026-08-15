@@ -6,13 +6,11 @@ export type ActivePlayerAction =
   | 'defender-pool'
   | 'reveal-next'
   | 'round-result'
-  | 'pending-duel-redo'
   | 'game-over'
 
 export interface ActivePlayerActionContext {
   isDifficultyPickerOpen: boolean
   roundResultVisible: boolean
-  pendingDuelRedoVisible: boolean
   phase: GamePhase
   isDefenderHuman: boolean
   selectionRequiredCount: number
@@ -23,7 +21,6 @@ export interface ActivePlayerActionContext {
 export function getActivePlayerAction({
   isDifficultyPickerOpen,
   roundResultVisible,
-  pendingDuelRedoVisible,
   phase,
   isDefenderHuman,
   selectionRequiredCount,
@@ -36,10 +33,6 @@ export function getActivePlayerAction({
 
   if (roundResultVisible) {
     return 'round-result'
-  }
-
-  if (pendingDuelRedoVisible) {
-    return 'pending-duel-redo'
   }
 
   if (phase === 'selecting' && isDefenderHuman && selectionRequiredCount > 0) {

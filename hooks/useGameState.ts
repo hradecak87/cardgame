@@ -6,11 +6,11 @@ import { npcSelectAttack } from '@/lib/game/npc'
 import {
   advanceCombat,
   beginRound,
+  canRedoRound,
   computeSlotCount,
   finalizeCombatState,
-  forfeitPendingDuelRedo,
   processRoundEnd,
-  redoPendingDuel,
+  redoRound,
   startNewGame as createNewGameState,
 } from '@/lib/game/state'
 import type {
@@ -20,7 +20,7 @@ import type {
   Difficulty,
   GamePhase,
   GameState,
-  PendingDuelRedo,
+  RoundStartSnapshot,
   RestingCard,
   Side,
 } from '@/lib/game/types'
@@ -40,15 +40,17 @@ type AutoAdvanceAction =
 export interface RoundResultState {
   capturedCards: Card[]
   lostCards: Card[]
+  canRedoRound: boolean
   nextState: GameState
+  redoState: GameState | null
 }
 
 const HYDRATION_PLACEHOLDER_STATE: GameState = {
   player: { available: [], resting: [] },
   npc: { available: [], resting: [] },
   difficulty: DEFAULT_SELECTED_DIFFICULTY,
-  duelRedosRemaining: 1,
-  pendingDuelRedo: null,
+  roundRedoAvailable: true,
+  roundStartSnapshot: null,
   attackerSide: 'npc',
   phase: 'selecting',
   combat: null,
@@ -135,31 +137,18 @@ function isCombatState(value: unknown): value is CombatState {
   )
 }
 
-function isResolvedDuel(value: unknown): boolean {
+function isRoundStartSnapshot(value: unknown): value is RoundStartSnapshot {
   if (!value || typeof value !== 'object') {
     return false
   }
 
-  const candidate = value as {
-    duel?: { attackerCard?: unknown; defenderCard?: unknown }
-    winner?: unknown
-  }
+  const candidate = value as Partial<RoundStartSnapshot>
 
   return (
-    Boolean(candidate.duel) &&
-    typeof candidate.duel === 'object' &&
-    isCard(candidate.duel.attackerCard) &&
-    isCard(candidate.duel.defenderCard) &&
-    (candidate.winner === 'attacker' || candidate.winner === 'defender')
+    isArmy(candidate.player) &&
+    isArmy(candidate.npc) &&
+    (candidate.attackerSide === 'player' || candidate.attackerSide === 'npc')
   )
-}
-
-function isPendingDuelRedo(value: unknown): value is PendingDuelRedo {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  return isResolvedDuel((value as Partial<PendingDuelRedo>).duel)
 }
 
 function isPlaceholderState(state: GameState): boolean {
@@ -186,8 +175,8 @@ export function isValidGameStateShape(value: unknown): value is GameState {
     isArmy(candidate.player) &&
     isArmy(candidate.npc) &&
     isDifficulty(candidate.difficulty) &&
-    (candidate.duelRedosRemaining === 0 || candidate.duelRedosRemaining === 1) &&
-    (candidate.pendingDuelRedo === null || isPendingDuelRedo(candidate.pendingDuelRedo)) &&
+    typeof candidate.roundRedoAvailable === 'boolean' &&
+    (candidate.roundStartSnapshot === null || isRoundStartSnapshot(candidate.roundStartSnapshot)) &&
     typeof candidate.phase === 'string' &&
     validPhases.includes(candidate.phase as GamePhase) &&
     typeof candidate.attackerSide === 'string' &&
@@ -283,7 +272,7 @@ function buildRoundResultCards(state: GameState): Pick<RoundResultState, 'captur
 }
 
 export function prepareRoundResult(state: GameState): { displayState: GameState; roundResult: RoundResultState | null } {
-  if (state.phase !== 'combat' || !state.combat || state.pendingDuelRedo) {
+  if (state.phase !== 'combat' || !state.combat) {
     return {
       displayState: state,
       roundResult: null,
@@ -310,7 +299,9 @@ export function prepareRoundResult(state: GameState): { displayState: GameState;
     displayState,
     roundResult: {
       ...buildRoundResultCards(displayState),
+      canRedoRound: canRedoRound(displayState),
       nextState: processRoundEnd(displayState),
+      redoState: canRedoRound(displayState) ? redoRound(displayState) : null,
     },
   }
 }
@@ -319,15 +310,19 @@ export function dismissRoundResult(roundResult: RoundResultState): GameState {
   return roundResult.nextState
 }
 
+export function redoRoundResult(roundResult: RoundResultState): GameState {
+  if (!roundResult.canRedoRound || !roundResult.redoState) {
+    throw new Error('There is no round redo available in this round result.')
+  }
+
+  return roundResult.redoState
+}
+
 export function getAutoAdvanceAction(
   state: GameState,
   roundResult: RoundResultState | null = null,
 ): AutoAdvanceAction | null {
   if (roundResult) {
-    return null
-  }
-
-  if (state.pendingDuelRedo) {
     return null
   }
 
@@ -399,8 +394,7 @@ export function useGameState(): {
     confirmDefenderSelection: (selectedCardIds: string[]) => void
     revealNextAttacker: () => void
     selectDefenderCard: (cardId: string) => void
-    redoPendingDuel: () => void
-    skipPendingDuelRedo: () => void
+    redoRound: () => void
     dismissRoundResult: () => void
   }
 } {
@@ -467,13 +461,14 @@ export function useGameState(): {
     [updateState],
   )
 
-  const handleRedoPendingDuel = useCallback(() => {
-    updateState((currentState) => redoPendingDuel(currentState))
-  }, [updateState])
+  const handleRedoRound = useCallback(() => {
+    if (!roundResult) {
+      return
+    }
 
-  const handleSkipPendingDuelRedo = useCallback(() => {
-    updateState((currentState) => forfeitPendingDuelRedo(currentState))
-  }, [updateState])
+    replaceState(redoRoundResult(roundResult))
+    setRoundResult(null)
+  }, [replaceState, roundResult])
 
   const handleDismissRoundResult = useCallback(() => {
     if (!roundResult) {
@@ -574,8 +569,7 @@ export function useGameState(): {
       confirmDefenderSelection,
       revealNextAttacker,
       selectDefenderCard,
-      redoPendingDuel: handleRedoPendingDuel,
-      skipPendingDuelRedo: handleSkipPendingDuelRedo,
+      redoRound: handleRedoRound,
       dismissRoundResult: handleDismissRoundResult,
     },
   }

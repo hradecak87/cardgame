@@ -3,7 +3,7 @@ import { dealHands, createDeck } from './deck'
 import { npcSelectDefense } from './npc'
 import { addWinnersToRest, ageRestingCards } from './rest'
 import { DIFFICULTY_CONFIG } from './types'
-import type { Army, Card, Difficulty, GameState, PendingDuelRedo, ResolvedDuel, Side } from './types'
+import type { Army, Card, Difficulty, GameState, ResolvedDuel, RoundStartSnapshot, Side } from './types'
 
 function getDefenderSide(attackerSide: Side): Side {
   return attackerSide === 'player' ? 'npc' : 'player'
@@ -26,17 +26,14 @@ function removeCards(available: Card[], selectedCards: Card[]): Card[] {
   return available.filter((card) => !selectedIds.has(card.id))
 }
 
-function removeCardById(available: Card[], cardId: string): Card[] {
-  return available.filter((card) => card.id !== cardId)
-}
-
-function drawRandomCard(available: Card[], rng: () => number): Card {
-  if (available.length === 0) {
-    throw new Error('Cannot draw from an empty card pool.')
+function cloneArmy(army: Army): Army {
+  return {
+    available: [...army.available],
+    resting: army.resting.map((entry) => ({
+      card: entry.card,
+      roundsRemaining: entry.roundsRemaining,
+    })),
   }
-
-  const cardIndex = Math.floor(rng() * available.length)
-  return available[cardIndex]
 }
 
 function totalArmySize(army: Army): number {
@@ -62,75 +59,28 @@ function ageArmies(player: Army, npc: Army): { player: Army; npc: Army } {
   }
 }
 
-function getInitialDuelRedoCount(difficulty: Difficulty): 0 | 1 {
-  return difficulty === 'easy' ? 1 : 0
-}
-
 function playerLostDuel(attackerSide: Side, duel: ResolvedDuel): boolean {
   return attackerSide === 'player' ? duel.winner === 'defender' : duel.winner === 'attacker'
 }
 
-function findPendingDuelRedo(
-  state: GameState,
-  newlyResolvedDuels: ResolvedDuel[],
-): PendingDuelRedo | null {
-  if (
-    state.difficulty !== 'easy' ||
-    state.duelRedosRemaining === 0 ||
-    getArmyForSide(state, state.attackerSide).available.length === 0
-  ) {
-    return null
-  }
-
-  for (let index = newlyResolvedDuels.length - 1; index >= 0; index -= 1) {
-    const duel = newlyResolvedDuels[index]
-
-    if (playerLostDuel(state.attackerSide, duel)) {
-      return { duel }
-    }
-  }
-
-  return null
+function shouldAllowRoundRedo(difficulty: Difficulty): boolean {
+  return difficulty === 'easy'
 }
 
-function applyPendingDuelRedo(
-  previousState: GameState,
-  nextCombat: GameState['combat'],
-  previousResolvedCount: number,
-): GameState {
-  if (!nextCombat) {
-    return {
-      ...previousState,
-      combat: null,
-      pendingDuelRedo: null,
-    }
-  }
-
-  const pendingDuelRedo = findPendingDuelRedo(
-    previousState,
-    nextCombat.resolvedDuels.slice(previousResolvedCount),
-  )
-
+function createRoundStartSnapshot(state: GameState): RoundStartSnapshot {
   return {
-    ...previousState,
-    combat: nextCombat,
-    pendingDuelRedo,
+    player: cloneArmy(state.player),
+    npc: cloneArmy(state.npc),
+    attackerSide: state.attackerSide,
   }
 }
 
-function replaceResolvedDuel(resolvedDuels: ResolvedDuel[], duelToRemove: ResolvedDuel): ResolvedDuel[] {
-  const duelIndex = resolvedDuels.findIndex(
-    (entry) =>
-      entry.winner === duelToRemove.winner &&
-      entry.duel.attackerCard.id === duelToRemove.duel.attackerCard.id &&
-      entry.duel.defenderCard.id === duelToRemove.duel.defenderCard.id,
-  )
-
-  if (duelIndex === -1) {
-    throw new Error('The pending duel redo no longer matches the combat history.')
+export function playerLostAnyDuel(state: GameState): boolean {
+  if (!state.combat) {
+    return false
   }
 
-  return resolvedDuels.filter((_, index) => index !== duelIndex)
+  return state.combat.resolvedDuels.some((duel) => playerLostDuel(state.attackerSide, duel))
 }
 
 /**
@@ -146,8 +96,8 @@ export function startNewGame(
     player,
     npc,
     difficulty,
-    duelRedosRemaining: getInitialDuelRedoCount(difficulty),
-    pendingDuelRedo: null,
+    roundRedoAvailable: shouldAllowRoundRedo(difficulty),
+    roundStartSnapshot: null,
     attackerSide: 'npc',
     phase: 'selecting',
     combat: null,
@@ -186,6 +136,7 @@ export function beginRound(
     return {
       ...state,
       ...aged,
+      roundStartSnapshot: null,
       phase: winner ? 'game-over' : 'selecting',
       winner,
       combat: null,
@@ -216,9 +167,10 @@ export function beginRound(
 
   return {
     ...replaceArmies(state, nextPlayer, nextNpc),
+    roundStartSnapshot:
+      state.roundRedoAvailable && state.difficulty === 'easy' ? createRoundStartSnapshot(state) : null,
     phase: 'combat',
     combat,
-    pendingDuelRedo: null,
     winner: null,
   }
 }
@@ -260,7 +212,10 @@ export function advanceCombat(
     }
   }
 
-  return applyPendingDuelRedo(state, assignDefenderCard(combat, selectedCardId), combat.resolvedDuels.length)
+  return {
+    ...state,
+    combat: assignDefenderCard(combat, selectedCardId),
+  }
 }
 
 export function finalizeCombatState(state: GameState): GameState {
@@ -274,62 +229,38 @@ export function finalizeCombatState(state: GameState): GameState {
     return state
   }
 
-  return applyPendingDuelRedo(state, finalizedCombat, state.combat.resolvedDuels.length)
-}
-
-export function redoPendingDuel(state: GameState, rng: () => number = Math.random): GameState {
-  if (state.phase !== 'combat' || !state.combat || !state.pendingDuelRedo) {
-    throw new Error('There is no duel redo available.')
-  }
-
-  const attackerSide = state.attackerSide
-  const defenderSide = getDefenderSide(attackerSide)
-  const attackerArmy = getArmyForSide(state, attackerSide)
-  const originalAttackerCard = state.pendingDuelRedo.duel.duel.attackerCard
-  const originalDefenderCard = state.pendingDuelRedo.duel.duel.defenderCard
-
-  if (attackerArmy.available.length === 0) {
-    throw new Error('Cannot redo a duel without a replacement attacker card.')
-  }
-
-  const actualReplacement = drawRandomCard(attackerArmy.available, rng)
-  const nextAttackerArmy: Army = {
-    ...attackerArmy,
-    available: [...removeCardById(attackerArmy.available, actualReplacement.id), originalAttackerCard],
-  }
-  const nextPlayer = attackerSide === 'player' ? nextAttackerArmy : state.player
-  const nextNpc = attackerSide === 'npc' ? nextAttackerArmy : state.npc
-  const redoneCombat = {
-    ...state.combat,
-    revealedCard: actualReplacement,
-    defenderPool: [...state.combat.defenderPool, originalDefenderCard],
-    resolvedDuels: replaceResolvedDuel(state.combat.resolvedDuels, state.pendingDuelRedo.duel),
-  }
-  const redoneState: GameState = {
+  return {
     ...state,
-    player: nextPlayer,
-    npc: nextNpc,
-    duelRedosRemaining: 0,
-    pendingDuelRedo: null,
-    combat: redoneCombat,
+    combat: finalizedCombat,
   }
-
-  if (defenderSide === 'npc') {
-    return advanceCombat(redoneState)
-  }
-
-  return redoneState
 }
 
-export function forfeitPendingDuelRedo(state: GameState): GameState {
-  if (!state.pendingDuelRedo) {
-    return state
+export function canRedoRound(state: GameState): boolean {
+  return (
+    state.phase === 'combat' &&
+    Boolean(state.combat) &&
+    state.difficulty === 'easy' &&
+    state.roundRedoAvailable &&
+    state.roundStartSnapshot !== null &&
+    playerLostAnyDuel(state)
+  )
+}
+
+export function redoRound(state: GameState): GameState {
+  if (!canRedoRound(state) || !state.roundStartSnapshot) {
+    throw new Error('There is no round redo available.')
   }
 
   return {
-    ...state,
-    duelRedosRemaining: 0,
-    pendingDuelRedo: null,
+    player: cloneArmy(state.roundStartSnapshot.player),
+    npc: cloneArmy(state.roundStartSnapshot.npc),
+    difficulty: state.difficulty,
+    roundRedoAvailable: false,
+    roundStartSnapshot: null,
+    attackerSide: state.roundStartSnapshot.attackerSide,
+    phase: 'selecting',
+    combat: null,
+    winner: null,
   }
 }
 
@@ -339,10 +270,6 @@ export function forfeitPendingDuelRedo(state: GameState): GameState {
 export function processRoundEnd(state: GameState): GameState {
   if (state.phase !== 'combat' || !state.combat) {
     throw new Error('Round end can only be processed from the combat phase.')
-  }
-
-  if (state.pendingDuelRedo) {
-    throw new Error('Round end cannot be processed while a duel redo is pending.')
   }
 
   const combat = finalizeCombat(state.combat)
@@ -381,8 +308,8 @@ export function processRoundEnd(state: GameState): GameState {
     player: nextPlayer,
     npc: nextNpc,
     difficulty: state.difficulty,
-    duelRedosRemaining: state.duelRedosRemaining,
-    pendingDuelRedo: null,
+    roundRedoAvailable: state.roundRedoAvailable,
+    roundStartSnapshot: null,
     attackerSide: winner ? state.attackerSide : defenderSide,
     phase: winner ? 'game-over' : 'selecting',
     combat: null,

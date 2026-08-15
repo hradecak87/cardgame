@@ -1,7 +1,6 @@
 'use client'
 
 import type { Army, Card, GamePhase, ResolvedDuel, Role } from '@/lib/game/types'
-import type { PendingDuelRedo } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ActionHighlight } from './ActionHighlight'
 import { BattleSlots } from './BattleSlots'
@@ -11,6 +10,7 @@ import { RestAreaStrip } from './RestAreaStrip'
 interface RoundResultSummary {
   capturedCards: Card[]
   lostCards: Card[]
+  canRedoRound: boolean
   endsGame: boolean
 }
 
@@ -21,7 +21,6 @@ interface GameBoardProps {
   revealedCard: Card | null
   defenderPool: Card[]
   resolvedDuels: ResolvedDuel[]
-  pendingDuelRedo?: PendingDuelRedo | null
   selectionAvailableCards: Card[]
   selectionRequiredCount: number
   isDefenderHuman: boolean
@@ -37,14 +36,12 @@ interface GameBoardProps {
   onSelectDefenderCard?: (cardId: string) => void
   onConfirmSelection?: (selectedCardIds: string[]) => void
   onRevealNext?: () => void
-  onRedoPendingDuel?: () => void
-  onSkipPendingDuelRedo?: () => void
+  onRedoRound?: () => void
   onDismissRoundResult?: () => void
   canRevealNext?: boolean
   highlightPlayerHandSelector?: boolean
   highlightDefenderPool?: boolean
   highlightRevealNext?: boolean
-  highlightPendingDuelRedo?: boolean
   highlightRoundResult?: boolean
 }
 
@@ -66,7 +63,6 @@ export function GameBoard({
   revealedCard,
   defenderPool,
   resolvedDuels,
-  pendingDuelRedo = null,
   selectionAvailableCards,
   selectionRequiredCount,
   isDefenderHuman,
@@ -82,14 +78,12 @@ export function GameBoard({
   onSelectDefenderCard,
   onConfirmSelection,
   onRevealNext,
-  onRedoPendingDuel,
-  onSkipPendingDuelRedo,
+  onRedoRound,
   onDismissRoundResult,
   canRevealNext = false,
   highlightPlayerHandSelector = false,
   highlightDefenderPool = false,
   highlightRevealNext = false,
-  highlightPendingDuelRedo = false,
   highlightRoundResult = false,
 }: GameBoardProps) {
   const { t } = useLanguage()
@@ -164,18 +158,14 @@ export function GameBoard({
             revealedCard={revealedCard}
             defenderPool={defenderPool}
             resolvedDuels={resolvedDuels}
-            pendingDuelRedo={pendingDuelRedo}
             onSelectDefenderCard={onSelectDefenderCard}
             onRevealNext={onRevealNext}
-            onRedoPendingDuel={onRedoPendingDuel}
-            onSkipPendingDuelRedo={onSkipPendingDuelRedo}
             canRevealNext={canRevealNext}
             isDefenderHuman={isDefenderHuman}
             phase={phase}
             isRoundResultVisible={Boolean(roundResult)}
             highlightDefenderPool={highlightDefenderPool}
             highlightRevealNext={highlightRevealNext}
-            highlightPendingDuelRedo={highlightPendingDuelRedo}
           />
         </section>
 
@@ -292,15 +282,44 @@ export function GameBoard({
                 </div>
               ) : null}
 
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  onClick={onDismissRoundResult}
-                  className="min-h-11 rounded-full border border-[#d3b26d] bg-[#d1ac56] px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-[#263225] transition hover:bg-[#dfbd6f]"
-                >
-                  {t((messages) => messages.board.continue)}
-                </button>
-              </div>
+              {roundResult.canRedoRound ? (
+                <ActionHighlight active={highlightRoundResult} className="mt-5 rounded-3xl border border-[#d3b26d]/40">
+                  <div className="rounded-3xl bg-[#d1ac56]/10 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-military-gold">
+                      {t((messages) => messages.board.roundRedoPrompt)}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-military-paper/80">
+                      {t((messages) => messages.board.roundRedoDescription)}
+                    </p>
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={onRedoRound}
+                        className="min-h-11 rounded-full border border-[#d3b26d] bg-[#d1ac56] px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-[#263225] transition hover:bg-[#dfbd6f]"
+                      >
+                        {t((messages) => messages.board.redoRound)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onDismissRoundResult}
+                        className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
+                      >
+                        {t((messages) => messages.board.continue)}
+                      </button>
+                    </div>
+                  </div>
+                </ActionHighlight>
+              ) : (
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={onDismissRoundResult}
+                    className="min-h-11 rounded-full border border-[#d3b26d] bg-[#d1ac56] px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-[#263225] transition hover:bg-[#dfbd6f]"
+                  >
+                    {t((messages) => messages.board.continue)}
+                  </button>
+                </div>
+              )}
             </section>
           </ActionHighlight>
         </div>

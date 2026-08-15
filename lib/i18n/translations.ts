@@ -57,6 +57,9 @@ export interface Translations {
     noCapturedCards: string
     noLostCards: string
     campaignEndingNotice: string
+    roundRedoPrompt: string
+    roundRedoDescription: string
+    redoRound: string
     continue: string
   }
   battleSlots: {
@@ -193,6 +196,10 @@ const en: Translations = {
     noCapturedCards: 'No enemy cards were captured.',
     noLostCards: 'No cards were lost this round.',
     campaignEndingNotice: 'This battle ends the campaign. Continue to see the final result.',
+    roundRedoPrompt: 'One-time easy command',
+    roundRedoDescription:
+      'This round cost you soldiers. You may replay the entire round once before marching on.',
+    redoRound: 'Redo this round',
     continue: 'Continue',
   },
   battleSlots: {
@@ -327,6 +334,10 @@ const cs: Translations = {
     noCapturedCards: 'Nezískal jsi žádné nepřátelské karty.',
     noLostCards: 'V tomto kole jsi nepřišel o žádné karty.',
     campaignEndingNotice: 'Tato bitva ukončuje celé tažení. Pokračuj a zobrazí se konečný výsledek.',
+    roundRedoPrompt: 'Jednorázový lehký rozkaz',
+    roundRedoDescription:
+      'Toto kolo tě stálo vojáky. Než potáhneš dál, můžeš jednou zopakovat celé kolo.',
+    redoRound: 'Zopakovat celé kolo',
     continue: 'Pokračovat',
   },
   battleSlots: {
@@ -382,4 +393,3 @@ export const translations: Record<Language, Translations> = {
   en,
   cs,
 }
-

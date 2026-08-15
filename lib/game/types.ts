@@ -41,8 +41,10 @@ export interface ResolvedDuel {
   winner: Role
 }
 
-export interface PendingDuelRedo {
-  duel: ResolvedDuel
+export interface RoundStartSnapshot {
+  player: Army
+  npc: Army
+  attackerSide: Side
 }
 
 export interface CombatState {
@@ -59,8 +61,8 @@ export interface GameState {
   player: Army
   npc: Army
   difficulty: Difficulty
-  duelRedosRemaining: 0 | 1
-  pendingDuelRedo: PendingDuelRedo | null
+  roundRedoAvailable: boolean
+  roundStartSnapshot: RoundStartSnapshot | null
   attackerSide: Side
   phase: GamePhase
   combat: CombatState | null

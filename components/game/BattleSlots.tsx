@@ -1,7 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import type { Card, GamePhase, PendingDuelRedo, ResolvedDuel } from '@/lib/game/types'
+import type { Card, GamePhase, ResolvedDuel } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ActionHighlight } from './ActionHighlight'
 import { PlayingCard } from './PlayingCard'
@@ -11,29 +11,14 @@ interface BattleSlotsProps {
   revealedCard: Card | null
   defenderPool: Card[]
   resolvedDuels: ResolvedDuel[]
-  pendingDuelRedo?: PendingDuelRedo | null
   onSelectDefenderCard?: (cardId: string) => void
   onRevealNext?: () => void
-  onRedoPendingDuel?: () => void
-  onSkipPendingDuelRedo?: () => void
   canRevealNext: boolean
   isDefenderHuman: boolean
   phase: GamePhase
   isRoundResultVisible?: boolean
   highlightDefenderPool?: boolean
   highlightRevealNext?: boolean
-  highlightPendingDuelRedo?: boolean
-}
-
-const suitSymbols: Record<Card['suit'], string> = {
-  hearts: '♥',
-  diamonds: '♦',
-  clubs: '♣',
-  spades: '♠',
-}
-
-function formatCardLabel(card: Card): string {
-  return `${card.rank}${suitSymbols[card.suit]}`
 }
 
 export function BattleSlots({
@@ -41,38 +26,31 @@ export function BattleSlots({
   revealedCard,
   defenderPool,
   resolvedDuels,
-  pendingDuelRedo = null,
   onSelectDefenderCard,
   onRevealNext,
-  onRedoPendingDuel,
-  onSkipPendingDuelRedo,
   canRevealNext,
   isDefenderHuman,
   phase,
   isRoundResultVisible = false,
   highlightDefenderPool = false,
   highlightRevealNext = false,
-  highlightPendingDuelRedo = false,
 }: BattleSlotsProps) {
   const { t } = useLanguage()
-  const redoPromptActive = Boolean(pendingDuelRedo)
-  const defenderCanAct = isDefenderHuman && !redoPromptActive && Boolean(revealedCard) && Boolean(onSelectDefenderCard)
-  const showRevealButton = !redoPromptActive && canRevealNext && typeof onRevealNext === 'function'
+  const defenderCanAct = isDefenderHuman && Boolean(revealedCard) && Boolean(onSelectDefenderCard)
+  const showRevealButton = canRevealNext && typeof onRevealNext === 'function'
   const battlefieldMessage = isRoundResultVisible
     ? t((messages) => messages.battleSlots.reviewRoundResult)
-    : redoPromptActive
-      ? 'Your last soldier fell. Use your one-time redo now, or continue without it.'
     : defenderCanAct
-    ? t((messages) => messages.battleSlots.chooseDefender)
-    : showRevealButton
-      ? t((messages) => messages.battleSlots.revealHiddenAttacker)
-      : !revealedCard && attackerQueueCount === 0
-        ? t((messages) => messages.battleSlots.preparingRoundResult)
-        : phase === 'selecting'
-          ? t((messages) => messages.battleSlots.assemblingLines)
-          : isDefenderHuman
-            ? t((messages) => messages.battleSlots.waitingForReveal)
-            : t((messages) => messages.battleSlots.npcDefendingAutomatically)
+      ? t((messages) => messages.battleSlots.chooseDefender)
+      : showRevealButton
+        ? t((messages) => messages.battleSlots.revealHiddenAttacker)
+        : !revealedCard && attackerQueueCount === 0
+          ? t((messages) => messages.battleSlots.preparingRoundResult)
+          : phase === 'selecting'
+            ? t((messages) => messages.battleSlots.assemblingLines)
+            : isDefenderHuman
+              ? t((messages) => messages.battleSlots.waitingForReveal)
+              : t((messages) => messages.battleSlots.npcDefendingAutomatically)
 
   return (
     <section className="max-w-full overflow-hidden rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(35,49,39,0.94),rgba(18,28,21,0.98))] p-4 shadow-2xl sm:p-5">
@@ -202,39 +180,6 @@ export function BattleSlots({
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.25em] text-military-paper/90">
               {t((messages) => messages.battleSlots.resolvedDuels)}
             </h3>
-
-            {pendingDuelRedo ? (
-              <ActionHighlight
-                active={highlightPendingDuelRedo}
-                className="mb-4 rounded-2xl border border-amber-300/30"
-              >
-                <div className="min-w-0 bg-amber-950/35 p-4 text-sm text-amber-100">
-                  <p className="font-semibold uppercase tracking-[0.18em] text-amber-200">
-                    Redo this duel / Zopakovat souboj
-                  </p>
-                  <p className="mt-2 break-words leading-6 text-amber-50/90">
-                    Lost clash: {formatCardLabel(pendingDuelRedo.duel.duel.attackerCard)} vs.{' '}
-                    {formatCardLabel(pendingDuelRedo.duel.duel.defenderCard)}.
-                  </p>
-                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={onRedoPendingDuel}
-                      className="min-h-11 rounded-full border border-[#d3b26d] bg-[#d1ac56] px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-[#263225] transition hover:bg-[#dfbd6f]"
-                    >
-                      Redo this duel / Zopakovat souboj
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onSkipPendingDuelRedo}
-                      className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
-                    >
-                      Continue without redo / Pokračovat bez opakování
-                    </button>
-                  </div>
-                </div>
-              </ActionHighlight>
-            ) : null}
 
             {resolvedDuels.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-military-paper/20 px-4 py-5 text-sm text-military-paper/60">
