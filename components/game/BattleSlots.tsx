@@ -165,6 +165,12 @@ export function BattleSlots({
                       <PlayingCard
                         card={card}
                         size="md"
+                        // Only the defender's own pool is real, selectable data.
+                        // When viewed from the attacker's side (or in PvP, the
+                        // non-defending client) these are count-only
+                        // placeholders and must stay hidden, not rendered as
+                        // if they were real face-up cards.
+                        faceDown={!isDefenderHuman}
                         onClick={
                           defenderCanAct ? () => onSelectDefenderCard?.(card.id) : undefined
                         }
