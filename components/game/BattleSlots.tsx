@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import type { Card, GamePhase, ResolvedDuel } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ActionHighlight } from './ActionHighlight'
+import { HiddenCardBack } from './HiddenCardBack'
 import { PlayingCard } from './PlayingCard'
 
 interface BattleSlotsProps {
@@ -157,29 +158,28 @@ export function BattleSlots({
                   defenderPool.map((card) => (
                     <motion.div
                       key={card.id}
-                      // No `layout` here: Framer Motion's layout-animation
-                      // (FLIP) recalculates this wrapper's own transform,
-                      // which conflicts with PlayingCard's nested 3D
-                      // rotateY flip (perspective/backface-visibility) and
-                      // renders the face-down card mirrored/incorrect
-                      // instead of hidden.
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="max-w-full"
                     >
-                      <PlayingCard
-                        card={card}
-                        size="md"
-                        // Only the defender's own pool is real, selectable data.
-                        // When viewed from the attacker's side (or in PvP, the
-                        // non-defending client) these are count-only
-                        // placeholders and must stay hidden, not rendered as
-                        // if they were real face-up cards.
-                        faceDown={!isDefenderHuman}
-                        onClick={
-                          defenderCanAct ? () => onSelectDefenderCard?.(card.id) : undefined
-                        }
-                      />
+                      {isDefenderHuman ? (
+                        <PlayingCard
+                          card={card}
+                          size="md"
+                          onClick={
+                            defenderCanAct ? () => onSelectDefenderCard?.(card.id) : undefined
+                          }
+                        />
+                      ) : (
+                        // These are count-only placeholders for the
+                        // opponent's pool: real identities are private and
+                        // must stay hidden. Rendered as a plain static
+                        // card back (no 3D flip) to avoid the "rotateY
+                        // flip renders mirrored instead of hidden" bug
+                        // some mobile browsers/WebViews have with
+                        // PlayingCard's faceDown transform.
+                        <HiddenCardBack size="md" />
+                      )}
                     </motion.div>
                   ))
                 )}
