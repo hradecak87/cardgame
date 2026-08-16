@@ -74,6 +74,7 @@ export interface Translations {
     roundRedoDescription: string
     redoRound: string
     continue: string
+    waitingForOpponentContinue: string
   }
   battleSlots: {
     battlefield: string
@@ -180,6 +181,12 @@ export interface Translations {
       opponentAbandoned: string
       reconnecting: string
     }
+  }
+  gameOverModal: {
+    eyebrow: string
+    ribbonWin: string
+    ribbonLoss: string
+    playAgain: string
   }
 }
 
@@ -288,6 +295,7 @@ const en: Translations = {
       'This round cost you soldiers. You may replay the entire round once before marching on.',
     redoRound: 'Redo this round',
     continue: 'Continue',
+    waitingForOpponentContinue: 'Waiting for your opponent…',
   },
   battleSlots: {
     battlefield: 'Battlefield',
@@ -396,6 +404,12 @@ const en: Translations = {
       reconnecting: 'reconnecting…',
     },
   },
+  gameOverModal: {
+    eyebrow: 'End of campaign',
+    ribbonWin: '🌿 VICTORY 🌿',
+    ribbonLoss: '🌿 DEFEAT 🌿',
+    playAgain: 'Play again',
+  },
 }
 
 const cs: Translations = {
@@ -500,6 +514,7 @@ const cs: Translations = {
       'Toto kolo tě stálo vojáky. Než potáhneš dál, můžeš jednou zopakovat celé kolo.',
     redoRound: 'Zopakovat celé kolo',
     continue: 'Pokračovat',
+    waitingForOpponentContinue: 'Čekáme na soupeře…',
   },
   battleSlots: {
     battlefield: 'Bojiště',
@@ -609,6 +624,12 @@ const cs: Translations = {
       opponentAbandoned: 'Soupeř opustil hru.',
       reconnecting: 'znovupřipojování…',
     },
+  },
+  gameOverModal: {
+    eyebrow: 'Konec tažení',
+    ribbonWin: '🌿 VÍTĚZSTVÍ 🌿',
+    ribbonLoss: '🌿 PORÁŽKA 🌿',
+    playAgain: 'Hrát znovu',
   },
 }
 

@@ -62,6 +62,8 @@ export function useMultiplayerGameState(): {
   isPeerConnected: boolean
   ownNickname: string | null
   opponentNickname: string | null
+  ownRoundSummaryDismissed: boolean
+  opponentRoundSummaryDismissed: boolean
   statusNotice: 'opponent-abandoned' | null
   actions: {
     createRoom: (nickname: string) => Promise<{ ok: true; code: string } | { ok: false; reason: string }>
@@ -1323,6 +1325,10 @@ export function useMultiplayerGameState(): {
       room.ownSlot === 'a'
         ? room.roomData?.player_b_nickname ?? null
         : room.roomData?.player_a_nickname ?? null,
+    ownRoundSummaryDismissed: room.ownSlot ? room.publicState?.roundSummaryDismissedBy[room.ownSlot] ?? false : false,
+    opponentRoundSummaryDismissed: room.ownSlot
+      ? room.publicState?.roundSummaryDismissedBy[room.ownSlot === 'a' ? 'b' : 'a'] ?? false
+      : false,
     actions: {
       createRoom,
       joinRoom,

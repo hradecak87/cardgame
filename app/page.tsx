@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { ActionHighlight } from '@/components/game/ActionHighlight'
 import { GameBoard } from '@/components/game/GameBoard'
+import { GameOverModal } from '@/components/game/GameOverModal'
+import { LanguageSwitcher } from '@/components/game/LanguageSwitcher'
 import { getActivePlayerAction } from '@/components/game/activePlayerAction'
 import { MainMenu } from '@/components/multiplayer/MainMenu'
 import { CreateRoomScreen } from '@/components/multiplayer/CreateRoomScreen'
@@ -107,7 +109,7 @@ function DifficultyPicker({
 export default function HomePage() {
   const { state, roundResult, selectedDifficulty, isDifficultyPickerOpen, isHydrated, actions } = useGameState()
   const multiplayerState = useMultiplayerGameState()
-  const { language, setLanguage, t } = useLanguage()
+  const { t } = useLanguage()
   const [gameMode, setGameMode] = useState<GameMode>('menu')
   const { clearStatusNotice, leaveRoom } = multiplayerState.actions
   const multiplayerNoticeMessage =
@@ -308,31 +310,7 @@ export default function HomePage() {
               isVisible={!multiplayerState.isPeerConnected}
               message={t((msg) => msg.multiplayer.connectionStatus.peerDisconnected)}
             />
-            <div className="flex items-center gap-1 rounded-full border border-military-paper/20 bg-black/30 p-1 text-xs font-bold uppercase tracking-[0.18em] text-military-paper shadow-lg">
-              <span className="px-2 text-military-paper/70">{t((messages) => messages.languageSwitcher.label)}</span>
-              {(['en', 'cs'] as const).map((option) => {
-                const label =
-                  option === 'en'
-                    ? t((messages) => messages.languageSwitcher.english)
-                    : t((messages) => messages.languageSwitcher.czech)
-
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => setLanguage(option)}
-                    aria-pressed={language === option}
-                    className={[
-                      'min-h-9 rounded-full px-3 py-2 transition',
-                      language === option ? 'bg-[#d1ac56] text-[#263225]' : 'text-military-paper/85 hover:bg-black/25',
-                    ].join(' ')}
-                  >
-                    {option.toUpperCase()}
-                    <span className="sr-only">{label}</span>
-                  </button>
-                )
-              })}
-            </div>
+            <LanguageSwitcher />
 
             <button
               type="button"
@@ -349,19 +327,6 @@ export default function HomePage() {
               {t((messages) => messages.multiplayer.game.leaveGame)}
             </button>
           </div>
-
-          {mpState.phase === 'game-over' ? (
-            <ActionHighlight active={false} className="rounded-[1.5rem] border border-[#d3b26d]">
-              <section className="bg-[#f0e2ba]/95 px-5 py-4 text-[#2d2414] shadow-xl">
-                <p className="text-xs font-bold uppercase tracking-[0.28em] text-[#7a5c22]">{t((messages) => messages.app.gameOver)}</p>
-                <h2 className="mt-1 text-xl font-semibold sm:text-2xl">
-                  {mpState.winner === 'player'
-                    ? t((messages) => messages.multiplayer.game.youWin)
-                    : t((messages) => messages.multiplayer.game.opponentWins)}
-                </h2>
-              </section>
-            </ActionHighlight>
-          ) : null}
         </div>
 
         <GameBoard
@@ -409,7 +374,24 @@ export default function HomePage() {
           highlightDefenderPool={false}
           highlightRevealNext={false}
           highlightRoundResult={Boolean(mpRoundResult)}
+          waitingForOpponentContinue={Boolean(mpRoundResult) && multiplayerState.ownRoundSummaryDismissed}
         />
+
+        {mpState.phase === 'game-over' ? (
+          <GameOverModal
+            won={mpState.winner === 'player'}
+            headline={
+              mpState.winner === 'player'
+                ? t((messages) => messages.multiplayer.game.youWin)
+                : t((messages) => messages.multiplayer.game.opponentWins)
+            }
+            primaryActionLabel={t((messages) => messages.multiplayer.game.backToMenu)}
+            onPrimaryAction={async () => {
+              setGameMode('menu')
+              await leaveRoom()
+            }}
+          />
+        ) : null}
       </div>
     )
   }
@@ -442,31 +424,7 @@ export default function HomePage() {
     <div className="relative">
       <div className="absolute left-0 right-0 top-0 z-10 mx-auto flex w-full max-w-7xl flex-col gap-3 px-3 pt-3 sm:px-5 lg:px-8">
         <div className="flex justify-end gap-3">
-          <div className="flex items-center gap-1 rounded-full border border-military-paper/20 bg-black/30 p-1 text-xs font-bold uppercase tracking-[0.18em] text-military-paper shadow-lg">
-            <span className="px-2 text-military-paper/70">{t((messages) => messages.languageSwitcher.label)}</span>
-            {(['en', 'cs'] as const).map((option) => {
-              const label =
-                option === 'en'
-                  ? t((messages) => messages.languageSwitcher.english)
-                  : t((messages) => messages.languageSwitcher.czech)
-
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setLanguage(option)}
-                  aria-pressed={language === option}
-                  className={[
-                    'min-h-9 rounded-full px-3 py-2 transition',
-                    language === option ? 'bg-[#d1ac56] text-[#263225]' : 'text-military-paper/85 hover:bg-black/25',
-                  ].join(' ')}
-                >
-                  {option.toUpperCase()}
-                  <span className="sr-only">{label}</span>
-                </button>
-              )
-            })}
-          </div>
+          <LanguageSwitcher />
 
           <button
             type="button"
@@ -476,22 +434,6 @@ export default function HomePage() {
             {t((messages) => messages.app.newGame)}
           </button>
         </div>
-
-        {state.phase === 'game-over' ? (
-          <ActionHighlight
-            active={activePlayerAction === 'game-over'}
-            className="rounded-[1.5rem] border border-[#d3b26d]"
-          >
-            <section className="bg-[#f0e2ba]/95 px-5 py-4 text-[#2d2414] shadow-xl">
-              <p className="text-xs font-bold uppercase tracking-[0.28em] text-[#7a5c22]">{t((messages) => messages.app.gameOver)}</p>
-              <h2 className="mt-1 text-xl font-semibold sm:text-2xl">
-                {state.winner === 'player'
-                  ? t((messages) => messages.app.playerWinsCampaign)
-                  : t((messages) => messages.app.npcWinsCampaign)}
-              </h2>
-            </section>
-          </ActionHighlight>
-        ) : null}
       </div>
 
       <GameBoard
@@ -533,6 +475,20 @@ export default function HomePage() {
         highlightRevealNext={activePlayerAction === 'reveal-next'}
         highlightRoundResult={activePlayerAction === 'round-result'}
       />
+
+      {state.phase === 'game-over' && !isDifficultyPickerOpen ? (
+        <GameOverModal
+          won={state.winner === 'player'}
+          headline={
+            state.winner === 'player'
+              ? t((messages) => messages.app.playerWinsCampaign)
+              : t((messages) => messages.app.npcWinsCampaign)
+          }
+          primaryActionLabel={t((messages) => messages.gameOverModal.playAgain)}
+          onPrimaryAction={actions.openDifficultyPicker}
+          active={activePlayerAction === 'game-over'}
+        />
+      ) : null}
 
       {isDifficultyPickerOpen && gameMode === 'single-player' ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-3 py-6 backdrop-blur-sm sm:px-5 lg:px-8">

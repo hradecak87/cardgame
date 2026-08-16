@@ -43,6 +43,7 @@ interface GameBoardProps {
   highlightDefenderPool?: boolean
   highlightRevealNext?: boolean
   highlightRoundResult?: boolean
+  waitingForOpponentContinue?: boolean
 }
 
 const suitSymbols: Record<Card['suit'], string> = {
@@ -85,6 +86,7 @@ export function GameBoard({
   highlightDefenderPool = false,
   highlightRevealNext = false,
   highlightRoundResult = false,
+  waitingForOpponentContinue = false,
 }: GameBoardProps) {
   const { t } = useLanguage()
   const opponentRole = playerRole === 'attacker' ? 'defender' : 'attacker'
@@ -315,6 +317,13 @@ export function GameBoard({
                     </div>
                   </div>
                 </ActionHighlight>
+              ) : waitingForOpponentContinue ? (
+                <div className="mt-6 flex justify-end">
+                  <div className="flex min-h-11 items-center gap-2 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper/80">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-military-gold" aria-hidden="true" />
+                    {t((messages) => messages.board.waitingForOpponentContinue)}
+                  </div>
+                </div>
               ) : (
                 <div className="mt-6 flex justify-end">
                   <button
