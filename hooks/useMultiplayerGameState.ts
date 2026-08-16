@@ -830,7 +830,18 @@ export function useMultiplayerGameState(): {
       // computeSlotCount()'s selection-required count once troops started resting
       // and permanently softlocked the round).
       const defenderTotal = defenderStats.availableCount
-      const slotCount = Math.min(room.ownHand.available.length + room.ownHand.pending_attack_queue.length, defenderTotal)
+      // BUG FIX #8: the slot cap must be based on how many cards were
+      // actually drawn into the attack queue for THIS round
+      // (pending_attack_queue.length), not the attacker's whole remaining
+      // army (available.length + pending_attack_queue.length). This
+      // "already drew, republish combat" fallback only runs when a
+      // previous attempt to publish the initial combat state didn't land
+      // (e.g. a remount/reconnect race) - using the wrong (much larger)
+      // total here permanently set attackerSlotsTotal above the number of
+      // cards that will ever be revealed, so
+      // attackerCardsRevealed.length could never catch up and the round
+      // could never reach round-summary, even after a page refresh.
+      const slotCount = Math.min(room.ownHand.pending_attack_queue.length, defenderTotal)
 
       const initialCombat = {
         attackerSlotsTotal: slotCount,

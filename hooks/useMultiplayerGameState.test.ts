@@ -321,6 +321,46 @@ describe('useMultiplayerGameState combat reveals', () => {
     expect((combatUpdate?.public_state as PublicState)?.combat?.attackerSlotsTotal).toBe(2)
   })
 
+  it('uses only the already-drawn attack queue size (not remaining available + queue) when republishing combat after a reconnect race', async () => {
+    // Regression test: when the attacker already drew their 3 cards into
+    // pending_attack_queue on a previous pass, but the initial combat
+    // state was never successfully published (e.g. a remount/reconnect
+    // race), this "already drew" fallback republishes it. It mistakenly
+    // capped attackerSlotsTotal at
+    // `available.length + pending_attack_queue.length` (the attacker's
+    // *entire remaining army*) instead of just
+    // `pending_attack_queue.length` (the cards actually queued for this
+    // round's combat). With a large army, this produced e.g.
+    // attackerSlotsTotal: 10 while only 3 cards would ever be revealed -
+    // a permanent mismatch that could never resolve (no round-summary
+    // popup, unfixable even by a page refresh, since it was already
+    // published to the DB).
+    const drawnCards = [createCard('attacker-1', 4), createCard('attacker-2', 5), createCard('attacker-3', 6)]
+    const roomData = createRoomRow({
+      attacker_side: 'a',
+      public_state: createPublicState({
+        phase: 'selecting',
+        combat: null,
+        playerB: { availableCount: 10, resting: [] },
+      }),
+    })
+    const handData = createHandRow({
+      player_uid: 'uid-a',
+      available: [createCard('a-4', 3), createCard('a-5', 3), createCard('a-6', 3), createCard('a-7', 3)],
+      pending_attack_queue: drawnCards,
+    })
+
+    const { roomUpdates } = await mountHookWithRoom(roomData, handData)
+
+    await waitFor(() => {
+      expect(roomUpdates.length).toBeGreaterThan(0)
+    })
+
+    const combatUpdate = roomUpdates.find((update) => (update.public_state as PublicState)?.combat !== undefined)
+
+    expect((combatUpdate?.public_state as PublicState)?.combat?.attackerSlotsTotal).toBe(3)
+  })
+
   describe('useMultiplayerGameState round-summary reconciliation', () => {
     beforeEach(() => {
       jest.useFakeTimers()
