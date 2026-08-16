@@ -157,7 +157,12 @@ export function BattleSlots({
                   defenderPool.map((card) => (
                     <motion.div
                       key={card.id}
-                      layout
+                      // No `layout` here: Framer Motion's layout-animation
+                      // (FLIP) recalculates this wrapper's own transform,
+                      // which conflicts with PlayingCard's nested 3D
+                      // rotateY flip (perspective/backface-visibility) and
+                      // renders the face-down card mirrored/incorrect
+                      // instead of hidden.
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="max-w-full"
