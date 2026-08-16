@@ -383,6 +383,43 @@ describe('useMultiplayerGameState combat reveals', () => {
 
       expect(roomUpdates).toHaveLength(0)
     })
+
+    it('transitions to round-summary once all duels are resolved, even when the defender is slot a (attacker is b)', async () => {
+      // Regression test: this logic previously hardcoded `ownSlot === 'b'`
+      // as "the defender", but deal_room() picks the attacker randomly
+      // ('a' or 'b') each round, so whenever attacker_side happened to be
+      // 'b' the real defender (slot 'a') never drove this transition and
+      // the round-summary popup never appeared, softlocking the game.
+      const attackerCard = createCard('attacker-1', 8)
+      const defenderCard = createCard('defender-1', 3)
+      const roomData = createRoomRow({
+        player_a_uid: 'uid-a',
+        player_b_uid: 'uid-b',
+        attacker_side: 'b',
+        public_state: createPublicState({
+          phase: 'combat',
+          combat: {
+            attackerSlotsTotal: 1,
+            attackerCardsRevealed: [attackerCard],
+            revealedCard: null,
+            defenderCommitted: true,
+            pendingTies: [],
+            resolvedDuels: [{ duel: { attackerCard, defenderCard }, winner: 'attacker' }],
+          },
+        }),
+      })
+      const handData = createHandRow({
+        player_uid: 'uid-a',
+      })
+
+      const { roomUpdates } = await mountHookWithRoom(roomData, handData)
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(roomUpdates.some((update) => (update.public_state as PublicState)?.phase === 'round-summary')).toBe(true)
+    })
   })
 
   it('does not auto-reveal a new attacker card while the previous duel is still unresolved', async () => {

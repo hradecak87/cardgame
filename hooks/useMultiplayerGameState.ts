@@ -558,7 +558,7 @@ export function useMultiplayerGameState(): {
         publicState.combat.revealedCard === null &&
         publicState.combat.attackerCardsRevealed.length === publicState.combat.attackerSlotsTotal &&
         publicState.combat.pendingTies.length > 0 &&
-        ownSlot === 'b'
+        roomData.attacker_side !== ownSlot
       ) {
         // Defender finalizes ties - construct a CombatState to pass to finalizeCombat
         const combatForFinalize: SinglePlayerCombatState = {
@@ -612,7 +612,7 @@ export function useMultiplayerGameState(): {
         publicState.combat.revealedCard === null &&
         publicState.combat.attackerCardsRevealed.length === publicState.combat.attackerSlotsTotal &&
         publicState.combat.pendingTies.length === 0 &&
-        ownSlot === 'b'
+        roomData.attacker_side !== ownSlot
       ) {
         const updates: Partial<PublicState> = {
           ...publicState,
