@@ -17,6 +17,7 @@ export interface Translations {
     chooseDifficulty: string
     chooseDifficultyDescription: string
     keepCurrentGame: string
+    backToMainMenu: string
     gameOver: string
     playerWinsCampaign: string
     npcWinsCampaign: string
@@ -205,6 +206,7 @@ const en: Translations = {
     chooseDifficulty: 'Choose difficulty',
     chooseDifficultyDescription: 'Pick the next opponent advantage before the campaign begins.',
     keepCurrentGame: 'Keep current game',
+    backToMainMenu: 'Back to main menu',
     gameOver: 'Game over',
     playerWinsCampaign: 'You win the campaign!',
     npcWinsCampaign: 'Marshal Automaton wins the campaign!',
@@ -427,6 +429,7 @@ const cs: Translations = {
     chooseDifficulty: 'Zvol obtížnost',
     chooseDifficultyDescription: 'Než tažení začne, vyber výhodu pro příštího soupeře.',
     keepCurrentGame: 'Nechat současnou hru',
+    backToMainMenu: 'Zpět na hlavní menu',
     gameOver: 'Konec hry',
     playerWinsCampaign: 'Vyhrál jsi tažení!',
     npcWinsCampaign: 'Maršál Automatón vyhrává tažení!',

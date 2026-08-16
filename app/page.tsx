@@ -48,12 +48,14 @@ function DifficultyPicker({
   onStart,
   onCancel,
   showCancel,
+  onBackToMenu,
   highlighted = false,
 }: {
   selectedDifficulty: Difficulty
   onStart: (difficulty: Difficulty) => void
   onCancel?: () => void
   showCancel: boolean
+  onBackToMenu?: () => void
   highlighted?: boolean
 }) {
   const { t } = useLanguage()
@@ -90,15 +92,26 @@ function DifficultyPicker({
           ))}
         </div>
 
-        {showCancel ? (
-          <div className="mt-6 flex justify-end">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
-            >
-              {t((messages) => messages.app.keepCurrentGame)}
-            </button>
+        {showCancel || onBackToMenu ? (
+          <div className="mt-6 flex flex-wrap justify-end gap-3">
+            {onBackToMenu ? (
+              <button
+                type="button"
+                onClick={onBackToMenu}
+                className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
+              >
+                {t((messages) => messages.app.backToMainMenu)}
+              </button>
+            ) : null}
+            {showCancel ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
+              >
+                {t((messages) => messages.app.keepCurrentGame)}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -197,7 +210,10 @@ export default function HomePage() {
             tone="critical"
           />
           <MainMenu
-            onSelectSinglePlayer={() => setGameMode('single-player')}
+            onSelectSinglePlayer={() => {
+              actions.openDifficultyPicker()
+              setGameMode('single-player')
+            }}
             onSelectMultiplayer={() => setGameMode('multiplayer-create')}
             onSelectJoinRoom={() => setGameMode('multiplayer-join')}
           />
@@ -270,7 +286,7 @@ export default function HomePage() {
   }
 
   // Single-player mode
-  if (gameMode === 'single-player' && totalCards === 0 && isDifficultyPickerOpen) {
+  if (gameMode === 'single-player' && isDifficultyPickerOpen && totalCards === 0) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
         <div className="w-full max-w-3xl">
@@ -278,6 +294,7 @@ export default function HomePage() {
             selectedDifficulty={selectedDifficulty}
             onStart={actions.startNewGame}
             showCancel={false}
+            onBackToMenu={() => setGameMode('menu')}
             highlighted={activePlayerAction === 'difficulty-picker'}
           />
         </div>
@@ -498,6 +515,7 @@ export default function HomePage() {
               onStart={actions.startNewGame}
               onCancel={actions.closeDifficultyPicker}
               showCancel
+              onBackToMenu={() => setGameMode('menu')}
               highlighted={activePlayerAction === 'difficulty-picker'}
             />
           </div>
