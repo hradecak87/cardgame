@@ -444,6 +444,24 @@ export function useMultiplayerGameState(): {
         // Age resting cards
         army = ageRestingCards(army)
 
+        // BUG FIX #10: the attacker always draws up to 3 cards into
+        // pending_attack_queue, but attackerSlotsTotal (and therefore how
+        // many actually get fought) is capped at the defender's available
+        // card count and can be lower. Any queued cards that never got
+        // revealed/fought this round were previously discarded entirely
+        // (pending_attack_queue is cleared to null below without folding
+        // unused cards back into `available`), silently shrinking the
+        // attacker's army every time this edge case occurred (e.g. when
+        // the opponent was down to their last card).
+        if (publicState.combat && ownSlot === roomData.attacker_side && ownHand.pending_attack_queue) {
+          const foughtCardIds = new Set(publicState.combat.attackerCardsRevealed.map((card) => card.id))
+          const unfoughtQueueCards = ownHand.pending_attack_queue.filter((card) => !foughtCardIds.has(card.id))
+
+          if (unfoughtQueueCards.length > 0) {
+            army = { ...army, available: [...army.available, ...unfoughtQueueCards] }
+          }
+        }
+
         // Add winners to rest
         if (publicState.combat && publicState.combat.resolvedDuels.length > 0) {
           const isAttacker = ownSlot === roomData.attacker_side
@@ -1217,6 +1235,22 @@ export function useMultiplayerGameState(): {
 
     // BUG FIX #2: Check that previous duel is resolved (revealedCard must be null)
     if (room.publicState.combat.revealedCard !== null) {
+      return
+    }
+
+    // BUG FIX #9: pending_attack_queue always holds up to 3 drawn cards,
+    // but attackerSlotsTotal (the number of duels that will actually be
+    // fought this round) is capped at the defender's available card count
+    // and can be lower - e.g. when the defender is down to their last
+    // card. Without this check, revealNextAttacker kept revealing cards
+    // straight out of the queue regardless of the slot cap, pushing
+    // attackerCardsRevealed.length past attackerSlotsTotal. That
+    // permanently broke the round-summary transition guard (which
+    // requires them to be equal) AND left the defender facing a revealed
+    // card with no defenderPoolCards entry left to answer it with (the
+    // pool was only ever sized to attackerSlotsTotal) - softlocking the
+    // round with no way to recover, even via a page refresh.
+    if (room.publicState.combat.attackerCardsRevealed.length >= room.publicState.combat.attackerSlotsTotal) {
       return
     }
 

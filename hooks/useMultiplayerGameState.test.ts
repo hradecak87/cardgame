@@ -546,6 +546,51 @@ describe('useMultiplayerGameState combat reveals', () => {
       expect(restingIds).toHaveLength(2)
     })
 
+    it('returns unfought queued attacker cards to available at round end instead of discarding them', async () => {
+      // Regression test: the attacker always draws up to 3 cards into
+      // pending_attack_queue, but attackerSlotsTotal (how many duels
+      // actually happen) is capped at the defender's available card
+      // count and can be lower - e.g. 1, when the opponent is down to
+      // their last card. The round-end reconciliation (Stage A) cleared
+      // pending_attack_queue to null without folding any queued-but-
+      // never-revealed cards back into `available`, silently deleting
+      // them from the attacker's army every time this edge case
+      // occurred.
+      const foughtCard = createCard('attacker-1', 8)
+      const unfoughtCard = createCard('attacker-2', 5)
+      const capturedCard = createCard('defender-1', 3)
+      const roomData = createRoomRow({
+        attacker_side: 'a',
+        public_state: createPublicState({
+          phase: 'round-summary',
+          roundSummaryDismissedBy: { a: true, b: true },
+          combat: {
+            attackerSlotsTotal: 1,
+            attackerCardsRevealed: [foughtCard],
+            revealedCard: null,
+            defenderCommitted: true,
+            pendingTies: [],
+            resolvedDuels: [{ duel: { attackerCard: foughtCard, defenderCard: capturedCard }, winner: 'attacker' }],
+          },
+        }),
+      })
+      const handData = createHandRow({
+        player_uid: 'uid-a',
+        available: [],
+        pending_attack_queue: [foughtCard, unfoughtCard],
+        last_applied_round: 0,
+      })
+
+      const { result } = await mountHookWithRoom(roomData, handData)
+
+      await waitFor(() => {
+        expect(result.current.state?.player.available.map((card) => card.id)).toContain('attacker-2')
+      })
+
+      expect(result.current.state?.player.available).toHaveLength(1)
+      expect(result.current.state?.player.available[0].id).toBe('attacker-2')
+    })
+
     it('lets the current attacker publish the shared conclusion in the same pass when becoming the second finisher', async () => {
       const roomData = createRoomRow({
         attacker_side: 'a',
@@ -668,6 +713,49 @@ describe('useMultiplayerGameState combat reveals', () => {
     const handData = createHandRow({
       player_uid: 'uid-a',
       pending_attack_queue: [alreadyRevealed, nextAttacker],
+    })
+
+    const { roomUpdates } = await mountHookWithRoom(roomData, handData)
+
+    await act(async () => {
+      jest.advanceTimersByTime(850)
+      await Promise.resolve()
+    })
+
+    expect(roomUpdates).toHaveLength(0)
+  })
+
+  it('does not auto-reveal a new attacker card once attackerCardsRevealed already reaches attackerSlotsTotal, even if unrevealed queue cards remain', async () => {
+    // Regression test: the attacker always draws up to 3 cards into
+    // pending_attack_queue, but attackerSlotsTotal (how many duels will
+    // actually happen this round) is capped at the defender's available
+    // card count and can be lower - e.g. 1, when the opponent is down to
+    // their last card. revealNextAttacker only checked that the previous
+    // duel was resolved (revealedCard === null) and that unrevealed cards
+    // remained in the *queue*, never that attackerCardsRevealed.length was
+    // still below attackerSlotsTotal. So once the single allowed duel
+    // resolved, it kept revealing further queued cards anyway, pushing
+    // attackerCardsRevealed past attackerSlotsTotal - permanently breaking
+    // the round-summary transition guard AND leaving the defender facing
+    // a revealed card with no defenderPoolCards entry left to answer it
+    // with (the pool was only ever sized to attackerSlotsTotal).
+    const firstAttacker = createCard('attacker-1', 8)
+    const secondAttacker = createCard('attacker-2', 5)
+    const roomData = createRoomRow({
+      public_state: createPublicState({
+        combat: {
+          attackerSlotsTotal: 1,
+          attackerCardsRevealed: [firstAttacker],
+          revealedCard: null,
+          defenderCommitted: true,
+          pendingTies: [],
+          resolvedDuels: [{ duel: { attackerCard: firstAttacker, defenderCard: createCard('defender-1', 3) }, winner: 'defender' }],
+        },
+      }),
+    })
+    const handData = createHandRow({
+      player_uid: 'uid-a',
+      pending_attack_queue: [firstAttacker, secondAttacker],
     })
 
     const { roomUpdates } = await mountHookWithRoom(roomData, handData)
