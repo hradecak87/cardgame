@@ -1,6 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import type { CSSProperties } from 'react'
 import type { Card } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -87,8 +88,29 @@ export function PlayingCard({
   const suitSymbol = suitSymbols[card.suit]
   const suitAccentClass = suitAccentClasses[card.suit]
 
+  // Some mobile browsers (notably iOS Safari and in-app WebViews) only
+  // respect the -webkit- prefixed 3D transform properties, even though
+  // modern desktop browsers accept the unprefixed versions. Tailwind's
+  // autoprefixer pass does not add these prefixes for arbitrary-value
+  // utility classes, so they're set explicitly via inline style instead
+  // of relying on the `[perspective:1200px]`/`[backface-visibility:hidden]`
+  // utility classes — otherwise the face-down back never actually hides
+  // the front, and the rotated front face renders mirrored instead.
+  const perspectiveStyle: CSSProperties = {
+    perspective: '1200px',
+    WebkitPerspective: 1200,
+  }
+  const preserve3dStyle: CSSProperties = {
+    transformStyle: 'preserve-3d',
+    WebkitTransformStyle: 'preserve-3d',
+  }
+  const hiddenBackfaceStyle: CSSProperties = {
+    backfaceVisibility: 'hidden',
+    WebkitBackfaceVisibility: 'hidden',
+  }
+
   return (
-    <div className="[perspective:1200px]">
+    <div style={perspectiveStyle}>
       <motion.button
         type="button"
         initial={false}
@@ -114,9 +136,9 @@ export function PlayingCard({
           interactive ? 'duration-150 hover:-translate-y-0.5 hover:shadow-xl' : '',
           selected ? 'shadow-[0_0_0_2px_rgba(184,146,58,0.9),0_16px_32px_rgba(0,0,0,0.28)]' : '',
         ].join(' ')}
-        style={{ transformStyle: 'preserve-3d' }}
+        style={preserve3dStyle}
       >
-        <div className="absolute inset-0 [backface-visibility:hidden]">
+        <div className="absolute inset-0" style={hiddenBackfaceStyle}>
           <div
             className={[
               'relative h-full border border-[#af8a44] bg-[linear-gradient(180deg,#f5ecd6_0%,#e8dcc1_55%,#dfcfad_100%)] text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),inset_0_-10px_20px_rgba(124,95,39,0.16)]',
@@ -166,7 +188,8 @@ export function PlayingCard({
         </div>
 
         <div
-          className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)]"
+          className="absolute inset-0"
+          style={{ ...hiddenBackfaceStyle, transform: 'rotateY(180deg)', WebkitTransform: 'rotateY(180deg)' }}
           aria-hidden={!faceDown}
         >
           <div

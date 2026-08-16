@@ -172,24 +172,24 @@ export function useMultiplayerGameState(): {
 
   // Connect to a room (shared logic for create/join/restore)
   const connectToRoom = useCallback(
-    async (code: string, requestedSlot?: PlayerSlot) => {
+    async (code: string, requestedSlot?: PlayerSlot): Promise<{ ok: true } | { ok: false; reason: string }> => {
       try {
         const supabase = getSupabaseClient()
         const playerUid = await ensureAnonymousSession()
         if (!playerUid) {
           console.error('No session')
-          return
+          return { ok: false, reason: 'No session' }
         }
 
         const roomData = await fetchRoomByCode(code)
         if (!roomData) {
           console.error('Room not found')
-          return
+          return { ok: false, reason: 'Room not found' }
         }
 
         if (isTerminalRoomStatus(roomData.status)) {
           clearRoomState()
-          return
+          return { ok: false, reason: `Room is ${roomData.status}` }
         }
 
         // Determine own slot if not already set
@@ -201,7 +201,7 @@ export function useMultiplayerGameState(): {
             ownSlot = 'b'
           } else {
             console.error('Player not in this room')
-            return
+            return { ok: false, reason: 'Player not in this room' }
           }
         }
 
@@ -230,8 +230,11 @@ export function useMultiplayerGameState(): {
 
         // Subscribe to Realtime updates
         subscribeToRoom(roomData.id, code, ownSlot, playerUid)
+
+        return { ok: true }
       } catch (error) {
         console.error('Error connecting to room:', error)
+        return { ok: false, reason: error instanceof Error ? error.message : 'Unknown error' }
       }
     },
     [clearRoomState, fetchRoomByCode, fetchPlayerHand, updateRoom],
@@ -893,7 +896,10 @@ export function useMultiplayerGameState(): {
         const code = result.code
         localStorage.setItem(ROOM_CODE_STORAGE_KEY, code)
 
-        await connectToRoom(code, 'a')
+        const connectResult = await connectToRoom(code, 'a')
+        if (!connectResult.ok) {
+          return { ok: false, reason: connectResult.reason }
+        }
 
         return { ok: true, code }
       } catch (error) {
@@ -926,7 +932,10 @@ export function useMultiplayerGameState(): {
 
         localStorage.setItem(ROOM_CODE_STORAGE_KEY, code)
 
-        await connectToRoom(code, 'b')
+        const connectResult = await connectToRoom(code, 'b')
+        if (!connectResult.ok) {
+          return { ok: false, reason: connectResult.reason }
+        }
 
         return { ok: true }
       } catch (error) {
