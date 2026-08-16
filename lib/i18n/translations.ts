@@ -13,11 +13,24 @@ export interface Translations {
     subtitle: string
     preparingBattlefield: string
     newGame: string
+    newCampaign: string
+    chooseDifficulty: string
+    chooseDifficultyDescription: string
+    keepCurrentGame: string
     gameOver: string
     playerWinsCampaign: string
     npcWinsCampaign: string
     playerArmyName: string
     opponentName: string
+    difficulty: {
+      label: string
+      easyLabel: string
+      easySummary: string
+      normalLabel: string
+      normalSummary: string
+      expertLabel: string
+      expertSummary: string
+    }
     roundLabel: (attackerSide: Side) => string
     phaseLabel: (phase: GamePhase, hasRoundResult: boolean) => string
     status: {
@@ -109,6 +122,8 @@ export interface Translations {
   }
   multiplayer: {
     mainMenu: {
+      eyebrow: string
+      title: string
       singlePlayer: string
       multiplayerOnline: string
       multiplayerJoin: string
@@ -118,10 +133,16 @@ export interface Translations {
       nicknameLabel: string
       nicknameInputPlaceholder: string
       createButton: string
+      creatingButton: string
       waitingMessage: string
       roomCode: string
       copyCode: string
       copiedToClipboard: string
+      errorCreateFailed: string
+      errorSessionUnavailable: string
+      errorCodeGenerationFailed: string
+      errorConnection: string
+      errorGeneric: string
     }
     joinRoom: {
       heading: string
@@ -130,12 +151,33 @@ export interface Translations {
       nicknameInputPlaceholder: string
       codeInputPlaceholder: string
       joinButton: string
+      joiningButton: string
       errorRoomNotFound: string
       errorRoomFull: string
       errorAlreadyStarted: string
+      errorJoinFailed: string
+      errorSessionUnavailable: string
+      errorGeneric: string
+    }
+    game: {
+      backToMenu: string
+      leaveGame: string
+      confirmLeaveGame: string
+      you: string
+      opponent: string
+      online: string
+      youWin: string
+      opponentWins: string
+      gameOverStatus: string
+      selectDefenderCards: (count: number) => string
+      opponentIsAttacking: string
+      chooseDefender: string
+      opponentIsDefending: string
+      roundLabel: (playerName: string, isAttacking: boolean) => string
     }
     connectionStatus: {
       peerDisconnected: string
+      opponentAbandoned: string
       reconnecting: string
     }
   }
@@ -152,11 +194,24 @@ const en: Translations = {
     subtitle: 'Napoleonic field command table',
     preparingBattlefield: 'Preparing the battlefield...',
     newGame: 'New Game',
+    newCampaign: 'New campaign',
+    chooseDifficulty: 'Choose difficulty',
+    chooseDifficultyDescription: 'Pick the next opponent advantage before the campaign begins.',
+    keepCurrentGame: 'Keep current game',
     gameOver: 'Game over',
     playerWinsCampaign: 'You win the campaign!',
     npcWinsCampaign: 'Marshal Automaton wins the campaign!',
     playerArmyName: 'Your Army',
     opponentName: 'Marshal Automaton',
+    difficulty: {
+      label: 'Difficulty',
+      easyLabel: 'Easy',
+      easySummary: '2 aces for the player, 2-round rest, one lifetime round redo.',
+      normalLabel: 'Normal',
+      normalSummary: '1 guaranteed ace, 50% chance for a second, standard 2-round rest.',
+      expertLabel: 'Expert',
+      expertSummary: 'Only 1 player ace and 3-round rest for captured soldiers.',
+    },
     roundLabel: (attackerSide) => (attackerSide === 'player' ? 'Player attack' : 'NPC attack'),
     phaseLabel: (phase, hasRoundResult) => {
       if (hasRoundResult) {
@@ -282,6 +337,8 @@ const en: Translations = {
   },
   multiplayer: {
     mainMenu: {
+      eyebrow: 'Game mode',
+      title: 'Choose how to play',
       singlePlayer: 'Play vs computer',
       multiplayerOnline: 'Create a room online',
       multiplayerJoin: 'Join a room with a code',
@@ -290,11 +347,17 @@ const en: Translations = {
       heading: 'Create a room',
       nicknameLabel: 'Your nickname',
       nicknameInputPlaceholder: 'Enter your nickname',
-      createButton: 'Založit',
-      waitingMessage: 'čekání na soupeře…',
+      createButton: 'Create room',
+      creatingButton: 'Creating...',
+      waitingMessage: 'Waiting for an opponent…',
       roomCode: 'Room code',
       copyCode: 'Copy code',
       copiedToClipboard: 'Copied to clipboard!',
+      errorCreateFailed: 'Failed to create room.',
+      errorSessionUnavailable: 'Could not start your multiplayer session.',
+      errorCodeGenerationFailed: 'Could not generate a room code. Please try again.',
+      errorConnection: 'Could not connect to the server.',
+      errorGeneric: 'An unexpected error occurred.',
     },
     joinRoom: {
       heading: 'Join a room',
@@ -302,13 +365,34 @@ const en: Translations = {
       codeLabel: 'Room code',
       nicknameInputPlaceholder: 'Enter your nickname',
       codeInputPlaceholder: '00000',
-      joinButton: 'Připojit',
+      joinButton: 'Join room',
+      joiningButton: 'Joining...',
       errorRoomNotFound: 'Room not found',
       errorRoomFull: 'Room is full',
       errorAlreadyStarted: 'Game has already started',
+      errorJoinFailed: 'Could not join the room.',
+      errorSessionUnavailable: 'Could not start your multiplayer session.',
+      errorGeneric: 'An unexpected error occurred.',
+    },
+    game: {
+      backToMenu: 'Back to menu',
+      leaveGame: 'Abandon game',
+      confirmLeaveGame: 'Leave this online match? Your opponent will be returned to the main menu.',
+      you: 'You',
+      opponent: 'Opponent',
+      online: 'Online',
+      youWin: 'You win!',
+      opponentWins: 'Your opponent wins!',
+      gameOverStatus: 'Game over',
+      selectDefenderCards: (count) => `Select ${count} defender card${count === 1 ? '' : 's'}`,
+      opponentIsAttacking: 'Opponent is attacking',
+      chooseDefender: 'Choose a defender',
+      opponentIsDefending: 'Opponent is defending',
+      roundLabel: (playerName, isAttacking) => `${playerName} ${isAttacking ? 'attacks' : 'defends'}`,
     },
     connectionStatus: {
       peerDisconnected: 'Opponent disconnected',
+      opponentAbandoned: 'Your opponent abandoned the game.',
       reconnecting: 'reconnecting…',
     },
   },
@@ -325,11 +409,24 @@ const cs: Translations = {
     subtitle: 'Napoleonské polní velitelské stanoviště',
     preparingBattlefield: 'Připravuji bojiště...',
     newGame: 'Nová hra',
+    newCampaign: 'Nové tažení',
+    chooseDifficulty: 'Zvol obtížnost',
+    chooseDifficultyDescription: 'Než tažení začne, vyber výhodu pro příštího soupeře.',
+    keepCurrentGame: 'Nechat současnou hru',
     gameOver: 'Konec hry',
     playerWinsCampaign: 'Vyhrál jsi tažení!',
     npcWinsCampaign: 'Maršál Automatón vyhrává tažení!',
     playerArmyName: 'Tvoje armáda',
     opponentName: 'Maršál Automatón',
+    difficulty: {
+      label: 'Obtížnost',
+      easyLabel: 'Lehká',
+      easySummary: 'Hráč dostane 2 esa, 2 kola odpočinku a jednu možnost zopakovat kolo.',
+      normalLabel: 'Normální',
+      normalSummary: '1 jisté eso, 50% šance na druhé a standardní 2 kola odpočinku.',
+      expertLabel: 'Expertní',
+      expertSummary: 'Jen 1 eso pro hráče a 3 kola odpočinku pro zajaté vojáky.',
+    },
     roundLabel: (attackerSide) => (attackerSide === 'player' ? 'Útok hráče' : 'Útok NPC'),
     phaseLabel: (phase, hasRoundResult) => {
       if (hasRoundResult) {
@@ -453,6 +550,8 @@ const cs: Translations = {
   },
   multiplayer: {
     mainMenu: {
+      eyebrow: 'Režim hry',
+      title: 'Zvol způsob hry',
       singlePlayer: 'Hrát proti počítači',
       multiplayerOnline: 'Založit online místnost',
       multiplayerJoin: 'Připojit se kódem',
@@ -462,10 +561,16 @@ const cs: Translations = {
       nicknameLabel: 'Tvoje přezdívka',
       nicknameInputPlaceholder: 'Zadej svou přezdívku',
       createButton: 'Založit',
-      waitingMessage: 'čekání na soupeře…',
+      creatingButton: 'Vytvářím...',
+      waitingMessage: 'Čekání na soupeře…',
       roomCode: 'Kód místnosti',
       copyCode: 'Kopírovat kód',
       copiedToClipboard: 'Zkopírováno do schránky!',
+      errorCreateFailed: 'Místnost se nepodařilo vytvořit.',
+      errorSessionUnavailable: 'Nepodařilo se spustit multiplayerovou relaci.',
+      errorCodeGenerationFailed: 'Nepodařilo se vygenerovat kód místnosti. Zkus to prosím znovu.',
+      errorConnection: 'Nepodařilo se připojit k serveru.',
+      errorGeneric: 'Došlo k neočekávané chybě.',
     },
     joinRoom: {
       heading: 'Připoj se k místnosti',
@@ -474,12 +579,34 @@ const cs: Translations = {
       nicknameInputPlaceholder: 'Zadej svou přezdívku',
       codeInputPlaceholder: '00000',
       joinButton: 'Připojit',
+      joiningButton: 'Připojuji...',
       errorRoomNotFound: 'Místnost nenalezena',
       errorRoomFull: 'Místnost je plná',
       errorAlreadyStarted: 'Hra již byla zahájena',
+      errorJoinFailed: 'Do místnosti se nepodařilo připojit.',
+      errorSessionUnavailable: 'Nepodařilo se spustit multiplayerovou relaci.',
+      errorGeneric: 'Došlo k neočekávané chybě.',
+    },
+    game: {
+      backToMenu: 'Zpět do menu',
+      leaveGame: 'Opustit hru',
+      confirmLeaveGame: 'Opravdu chceš opustit online zápas? Soupeř bude vrácen do hlavního menu.',
+      you: 'Ty',
+      opponent: 'Soupeř',
+      online: 'Online',
+      youWin: 'Vyhráváš!',
+      opponentWins: 'Vyhrává soupeř!',
+      gameOverStatus: 'Konec hry',
+      selectDefenderCards: (count) =>
+        `Vyber ${count} obrann${count === 1 ? 'ou kartu' : count >= 2 && count <= 4 ? 'é karty' : 'ých karet'}`,
+      opponentIsAttacking: 'Soupeř útočí',
+      chooseDefender: 'Vyber obránce',
+      opponentIsDefending: 'Soupeř se brání',
+      roundLabel: (playerName, isAttacking) => `${playerName} ${isAttacking ? 'útočí' : 'brání se'}`,
     },
     connectionStatus: {
       peerDisconnected: 'Soupeř se odpojil',
+      opponentAbandoned: 'Soupeř opustil hru.',
       reconnecting: 'znovupřipojování…',
     },
   },

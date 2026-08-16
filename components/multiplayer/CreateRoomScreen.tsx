@@ -16,6 +16,20 @@ export function CreateRoomScreen({ onCreateRoom, roomCode, roomStatus }: CreateR
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
 
+  const getCreateRoomErrorMessage = (reason?: string) => {
+    switch (reason) {
+      case 'No session':
+        return t((msg) => msg.multiplayer.createRoom.errorSessionUnavailable)
+      case 'collision':
+      case 'exhausted-retries':
+        return t((msg) => msg.multiplayer.createRoom.errorCodeGenerationFailed)
+      case 'network-error':
+        return t((msg) => msg.multiplayer.createRoom.errorConnection)
+      default:
+        return t((msg) => msg.multiplayer.createRoom.errorCreateFailed)
+    }
+  }
+
   const handleCreate = async () => {
     if (!nickname.trim()) {
       return
@@ -25,10 +39,10 @@ export function CreateRoomScreen({ onCreateRoom, roomCode, roomStatus }: CreateR
     try {
       const result = await onCreateRoom(nickname)
       if (!result.ok) {
-        setError(result.reason || 'Failed to create room')
+        setError(getCreateRoomErrorMessage(result.reason))
       }
     } catch (err) {
-      setError('An error occurred')
+      setError(t((msg) => msg.multiplayer.createRoom.errorGeneric))
       console.error('Error creating room:', err)
     } finally {
       setLoading(false)
@@ -44,7 +58,7 @@ export function CreateRoomScreen({ onCreateRoom, roomCode, roomStatus }: CreateR
     }
   }
 
-  if (roomCode && roomStatus === 'waiting') {
+  if (roomCode && (roomStatus === 'waiting' || roomStatus === 'dealing')) {
     return (
       <section className="max-w-full overflow-hidden rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(36,49,39,0.98),rgba(20,30,23,0.98))] p-6 text-military-paper shadow-2xl">
         <p className="text-xs uppercase tracking-[0.35em] text-military-gold">{t((msg) => msg.multiplayer.createRoom.heading)}</p>
@@ -95,7 +109,7 @@ export function CreateRoomScreen({ onCreateRoom, roomCode, roomStatus }: CreateR
           disabled={loading || !nickname.trim()}
           className="min-h-11 rounded-full border border-[#9b7b3d] bg-[#9b7b3d]/20 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-gold transition hover:bg-[#9b7b3d]/30 disabled:opacity-50"
         >
-          {loading ? 'Creating...' : t((msg) => msg.multiplayer.createRoom.createButton)}
+          {loading ? t((msg) => msg.multiplayer.createRoom.creatingButton) : t((msg) => msg.multiplayer.createRoom.createButton)}
         </button>
       </div>
     </section>

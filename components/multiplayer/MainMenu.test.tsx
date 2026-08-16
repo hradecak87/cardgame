@@ -27,6 +27,15 @@ function renderMainMenu(overrides?: Partial<React.ComponentProps<typeof MainMenu
 }
 
 describe('MainMenu', () => {
+  it('renders localized menu headings instead of bilingual hardcoded text', () => {
+    renderMainMenu()
+
+    expect(screen.getByText('Game mode')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Choose how to play' })).toBeInTheDocument()
+    expect(screen.queryByText(/Game mode \/ Režim hry/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Choose how to play \/ Zvolte způsob hry/i)).not.toBeInTheDocument()
+  })
+
   it('renders all three game mode buttons', () => {
     renderMainMenu()
 

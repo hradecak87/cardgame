@@ -14,11 +14,16 @@ import {
 import { ageRestingCards, addWinnersToRest } from '@/lib/game/rest'
 import { computeSlotCount } from '@/lib/game/state'
 import type { GameState, CombatState as SinglePlayerCombatState, Duel } from '@/lib/game/types'
+import { getAutoAdvanceAction } from './useGameState'
 
 export const ROOM_CODE_STORAGE_KEY = 'battle-card-game-multiplayer-room-code'
 
 export function loadStoredRoomCode(rawValue: string | null): string | null {
   return rawValue && /^\d{5}$/.test(rawValue) ? rawValue : null
+}
+
+function isTerminalRoomStatus(status: RoomRow['status'] | null | undefined): status is 'finished' | 'abandoned' {
+  return status === 'finished' || status === 'abandoned'
 }
 
 interface RoomState {
@@ -57,6 +62,7 @@ export function useMultiplayerGameState(): {
   isPeerConnected: boolean
   ownNickname: string | null
   opponentNickname: string | null
+  statusNotice: 'opponent-abandoned' | null
   actions: {
     createRoom: (nickname: string) => Promise<{ ok: true; code: string } | { ok: false; reason: string }>
     joinRoom: (code: string, nickname: string) => Promise<{ ok: true } | { ok: false; reason: string }>
@@ -64,18 +70,42 @@ export function useMultiplayerGameState(): {
     revealNextAttacker: () => void
     selectDefenderCard: (cardId: string) => void
     dismissRoundResult: () => void
-    leaveRoom: () => void
+    leaveRoom: () => Promise<void>
+    clearStatusNotice: () => void
   }
 } {
   const [room, setRoom] = useState<RoomState>(INITIAL_ROOM_STATE)
+  const [statusNotice, setStatusNotice] = useState<'opponent-abandoned' | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const dealTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const reconcileTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const autoRevealTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Helper to update room state
   const updateRoom = useCallback((updates: Partial<RoomState>) => {
     setRoom((prev) => ({ ...prev, ...updates }))
+  }, [])
+
+  const clearRoomState = useCallback((notice: 'opponent-abandoned' | null = null) => {
+    if (dealTimeoutRef.current) {
+      clearTimeout(dealTimeoutRef.current)
+      dealTimeoutRef.current = null
+    }
+
+    if (autoRevealTimeoutRef.current) {
+      clearTimeout(autoRevealTimeoutRef.current)
+      autoRevealTimeoutRef.current = null
+    }
+
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current()
+      unsubscribeRef.current = null
+    }
+
+    channelRef.current = null
+    localStorage.removeItem(ROOM_CODE_STORAGE_KEY)
+    setRoom(INITIAL_ROOM_STATE)
+    setStatusNotice(notice)
   }, [])
 
   // Fetch player hand from Supabase
@@ -157,6 +187,11 @@ export function useMultiplayerGameState(): {
           return
         }
 
+        if (isTerminalRoomStatus(roomData.status)) {
+          clearRoomState()
+          return
+        }
+
         // Determine own slot if not already set
         let ownSlot: PlayerSlot | null = requestedSlot || null
         if (!ownSlot) {
@@ -199,7 +234,7 @@ export function useMultiplayerGameState(): {
         console.error('Error connecting to room:', error)
       }
     },
-    [fetchRoomByCode, fetchPlayerHand, updateRoom],
+    [clearRoomState, fetchRoomByCode, fetchPlayerHand, updateRoom],
   )
 
   // Subscribe to room updates via Realtime
@@ -225,6 +260,13 @@ export function useMultiplayerGameState(): {
           (payload) => {
             if (payload.new && typeof payload.new === 'object') {
               const newRoom = payload.new as RoomRow
+
+              if (newRoom.status === 'abandoned') {
+                const wasAbandonedByOpponent = Boolean(newRoom.abandoned_by && newRoom.abandoned_by !== playerUid)
+                clearRoomState(wasAbandonedByOpponent ? 'opponent-abandoned' : null)
+                return
+              }
+
               updateRoom({
                 roomData: newRoom,
                 publicState: newRoom.public_state,
@@ -280,7 +322,7 @@ export function useMultiplayerGameState(): {
         channel.unsubscribe()
       }
     },
-    [updateRoom, fetchPlayerHand],
+    [clearRoomState, updateRoom, fetchPlayerHand],
   )
 
   // Handle room status changes (e.g., from 'waiting' to 'dealing')
@@ -316,14 +358,16 @@ export function useMultiplayerGameState(): {
       return
     }
 
+    let cancelled = false
+
     const reconcile = async () => {
       const supabase = getSupabaseClient()
-      const publicState = room.publicState
-      const ownHand = room.ownHand
+      let publicState = room.publicState
+      let ownHand = room.ownHand
       const ownSlot = room.ownSlot
       const roomId = room.roomId
-      const version = room.version
-      const roomData = room.roomData
+      let version = room.version
+      let roomData = room.roomData
 
       if (!publicState || !ownHand || !roomData) {
         return
@@ -375,16 +419,22 @@ export function useMultiplayerGameState(): {
             .eq('room_id', roomId)
             .eq('player_uid', ownHand.player_uid)
 
+          if (cancelled) {
+            return
+          }
+
+          ownHand = {
+            ...ownHand,
+            available: army.available,
+            resting: army.resting,
+            pending_attack_queue: null,
+            pending_defender_pool: null,
+            last_applied_round: publicState.roundNumber,
+          }
+
           // Update local state
           updateRoom({
-            ownHand: {
-              ...ownHand,
-              available: army.available,
-              resting: army.resting,
-              pending_attack_queue: null,
-              pending_defender_pool: null,
-              last_applied_round: publicState.roundNumber,
-            },
+            ownHand,
           })
         } catch (error) {
           console.error('Error applying round end:', error)
@@ -432,6 +482,20 @@ export function useMultiplayerGameState(): {
 
         if (!writeResult.ok) {
           console.error('Error publishing round completion:', writeResult)
+        } else {
+          publicState = updates as PublicState
+          version += 1
+          roomData = {
+            ...roomData,
+            public_state: publicState,
+            version,
+          }
+
+          updateRoom({
+            publicState,
+            roomData,
+            version,
+          })
         }
       }
 
@@ -526,8 +590,10 @@ export function useMultiplayerGameState(): {
       if (
         publicState.roundEndAppliedBy.a &&
         publicState.roundEndAppliedBy.b &&
-        publicState.phase !== 'game-over'
+        publicState.phase !== 'game-over' &&
+        roomData.attacker_side === ownSlot
       ) {
+        const currentAttackerSide = roomData.attacker_side
         const playerACards = publicState.playerA.availableCount + publicState.playerA.resting.length
         const playerBCards = publicState.playerB.availableCount + publicState.playerB.resting.length
 
@@ -558,7 +624,7 @@ export function useMultiplayerGameState(): {
             .from('rooms')
             .update({
               public_state: updates,
-              attacker_side: roomData.attacker_side === 'a' ? 'b' : 'a',
+              attacker_side: currentAttackerSide === 'a' ? 'b' : 'a',
               winner,
               status: newStatus,
               version: version + 1,
@@ -571,20 +637,35 @@ export function useMultiplayerGameState(): {
 
         if (!writeResult.ok) {
           console.error('Error publishing shared conclusion:', writeResult)
+        } else {
+          const nextAttackerSide = currentAttackerSide === 'a' ? 'b' : 'a'
+          publicState = updates as PublicState
+          version += 1
+          roomData = {
+            ...roomData,
+            public_state: publicState,
+            attacker_side: nextAttackerSide,
+            winner,
+            status: newStatus,
+            version,
+          }
+
+          updateRoom({
+            publicState,
+            roomData,
+            status: newStatus,
+            version,
+          })
         }
       }
     }
 
-    reconcileTimeoutRef.current = setTimeout(() => {
-      reconcile().catch((error) => {
-        console.error('Unhandled error in reconciliation effect:', error)
-      })
-    }, 100)
+    reconcile().catch((error) => {
+      console.error('Unhandled error in reconciliation effect:', error)
+    })
 
     return () => {
-      if (reconcileTimeoutRef.current) {
-        clearTimeout(reconcileTimeoutRef.current)
-      }
+      cancelled = true
     }
   }, [room.publicState, room.ownHand, room.ownSlot, room.roomId, room.version])
 
@@ -1025,6 +1106,26 @@ export function useMultiplayerGameState(): {
     })
   }, [room])
 
+  useEffect(() => {
+    if (!state || !room.ownSlot || room.roomData?.attacker_side !== room.ownSlot || !room.publicState?.combat?.defenderCommitted) {
+      return
+    }
+
+    if (getAutoAdvanceAction(state) !== 'reveal-next-attacker') {
+      return
+    }
+
+    autoRevealTimeoutRef.current = setTimeout(() => {
+      revealNextAttacker()
+    }, 850)
+
+    return () => {
+      if (autoRevealTimeoutRef.current) {
+        clearTimeout(autoRevealTimeoutRef.current)
+      }
+    }
+  }, [revealNextAttacker, room.ownSlot, room.publicState?.combat?.defenderCommitted, room.roomData?.attacker_side, state])
+
   const selectDefenderCard = useCallback(
     (cardId: string) => {
       if (!room.publicState || !room.ownSlot || !room.roomId || !room.ownHand) {
@@ -1114,12 +1215,33 @@ export function useMultiplayerGameState(): {
     })
   }, [room])
 
-  const leaveRoom = useCallback(() => {
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current()
+  const leaveRoom = useCallback(async () => {
+    const roomId = room.roomId
+    const ownUid = room.ownUid
+    const currentStatus = room.status
+
+    clearRoomState()
+
+    if (!roomId || !ownUid || !currentStatus || isTerminalRoomStatus(currentStatus)) {
+      return
     }
-    localStorage.removeItem(ROOM_CODE_STORAGE_KEY)
-    setRoom(INITIAL_ROOM_STATE)
+
+    try {
+      const supabase = getSupabaseClient()
+      await supabase
+        .from('rooms')
+        .update({
+          status: 'abandoned',
+          abandoned_by: ownUid,
+        })
+        .eq('id', roomId)
+    } catch (error) {
+      console.error('Error abandoning room:', error)
+    }
+  }, [clearRoomState, room.ownUid, room.roomId, room.status])
+
+  const clearStatusNotice = useCallback(() => {
+    setStatusNotice(null)
   }, [])
 
   return {
@@ -1128,6 +1250,7 @@ export function useMultiplayerGameState(): {
     roomCode: room.roomCode,
     publicPhase: room.publicState?.phase ?? null,
     isPeerConnected: room.isPeerConnected,
+    statusNotice,
     ownNickname:
       room.ownSlot === 'a'
         ? room.roomData?.player_a_nickname ?? null
@@ -1144,6 +1267,7 @@ export function useMultiplayerGameState(): {
       selectDefenderCard,
       dismissRoundResult,
       leaveRoom,
+      clearStatusNotice,
     },
   }
 }

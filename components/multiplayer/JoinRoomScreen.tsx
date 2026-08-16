@@ -14,6 +14,32 @@ export function JoinRoomScreen({ onJoinRoom }: JoinRoomScreenProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  const getJoinRoomErrorMessage = (reason?: string) => {
+    if (!reason) {
+      return t((msg) => msg.multiplayer.joinRoom.errorJoinFailed)
+    }
+
+    if (reason === 'No session') {
+      return t((msg) => msg.multiplayer.joinRoom.errorSessionUnavailable)
+    }
+
+    const normalizedReason = reason.toLowerCase()
+
+    if (normalizedReason.includes('room not found')) {
+      return t((msg) => msg.multiplayer.joinRoom.errorRoomNotFound)
+    }
+
+    if (normalizedReason.includes('room is full')) {
+      return t((msg) => msg.multiplayer.joinRoom.errorRoomFull)
+    }
+
+    if (normalizedReason.includes('already started')) {
+      return t((msg) => msg.multiplayer.joinRoom.errorAlreadyStarted)
+    }
+
+    return t((msg) => msg.multiplayer.joinRoom.errorJoinFailed)
+  }
+
   const handleJoin = async () => {
     if (!nickname.trim() || !code.trim()) {
       return
@@ -23,10 +49,10 @@ export function JoinRoomScreen({ onJoinRoom }: JoinRoomScreenProps) {
     try {
       const result = await onJoinRoom(code, nickname)
       if (!result.ok) {
-        setError(result.reason || 'Failed to join room')
+        setError(getJoinRoomErrorMessage(result.reason))
       }
     } catch (err) {
-      setError('An error occurred')
+      setError(t((msg) => msg.multiplayer.joinRoom.errorGeneric))
       console.error('Error joining room:', err)
     } finally {
       setLoading(false)
@@ -72,7 +98,7 @@ export function JoinRoomScreen({ onJoinRoom }: JoinRoomScreenProps) {
           disabled={loading || !nickname.trim() || !code.trim()}
           className="min-h-11 rounded-full border border-[#9b7b3d] bg-[#9b7b3d]/20 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-gold transition hover:bg-[#9b7b3d]/30 disabled:opacity-50"
         >
-          {loading ? 'Joining...' : t((msg) => msg.multiplayer.joinRoom.joinButton)}
+          {loading ? t((msg) => msg.multiplayer.joinRoom.joiningButton) : t((msg) => msg.multiplayer.joinRoom.joinButton)}
         </button>
       </div>
     </section>

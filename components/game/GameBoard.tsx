@@ -68,12 +68,12 @@ export function GameBoard({
   isDefenderHuman,
   playerRole,
   phase,
-  playerName = 'Your Army',
-  opponentName = 'Marshal Automaton',
-  roundLabel = 'Round 4',
-  phaseLabel = 'Combat preview',
-  statusMessage = 'The defender answers each revealed attacker one duel at a time.',
-  difficultyLabel = 'Easy / Lehká',
+  playerName,
+  opponentName,
+  roundLabel,
+  phaseLabel,
+  statusMessage,
+  difficultyLabel,
   roundResult = null,
   onSelectDefenderCard,
   onConfirmSelection,
@@ -89,6 +89,12 @@ export function GameBoard({
   const { t } = useLanguage()
   const opponentRole = playerRole === 'attacker' ? 'defender' : 'attacker'
   const showSelectionPanel = phase === 'selecting' && isDefenderHuman && selectionRequiredCount > 0
+  const displayedPlayerName = playerName ?? t((messages) => messages.app.playerArmyName)
+  const displayedOpponentName = opponentName ?? t((messages) => messages.app.opponentName)
+  const displayedRoundLabel = roundLabel ?? t((messages) => messages.app.roundLabel('player'))
+  const displayedPhaseLabel = phaseLabel ?? t((messages) => messages.app.phaseLabel(phase, Boolean(roundResult)))
+  const displayedStatusMessage = statusMessage ?? t((messages) => messages.board.defenderOverview)
+  const displayedDifficultyLabel = difficultyLabel ?? t((messages) => messages.app.difficulty.easyLabel)
 
   return (
     <main className="min-h-screen overflow-x-clip bg-[radial-gradient(circle_at_top,_rgba(101,126,80,0.18),_transparent_24%),radial-gradient(circle_at_bottom,_rgba(0,0,0,0.2),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-3 pb-6 pt-24 text-military-paper sm:px-5 sm:pt-28 lg:px-8">
@@ -100,15 +106,15 @@ export function GameBoard({
                 {t((messages) => messages.app.title)}
               </p>
               <h1 className="mt-2 text-2xl font-semibold sm:text-3xl lg:text-4xl">{t((messages) => messages.app.subtitle)}</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-military-paper/78 sm:text-base">{statusMessage}</p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-military-paper/78 sm:text-base">{displayedStatusMessage}</p>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="rounded-2xl border border-military-paper/10 bg-black/15 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.25em] text-military-gold">
-                  {roundLabel}
+                  {displayedRoundLabel}
                 </div>
-                <div className="mt-1 text-base font-semibold sm:text-lg">{phaseLabel}</div>
+                <div className="mt-1 text-base font-semibold sm:text-lg">{displayedPhaseLabel}</div>
               </div>
               <div className="rounded-2xl border border-military-paper/10 bg-black/15 px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.25em] text-military-gold">
@@ -117,8 +123,8 @@ export function GameBoard({
                 <div className="mt-1 text-base font-semibold capitalize sm:text-lg">{t((messages) => messages.roles[playerRole])}</div>
               </div>
               <div className="rounded-2xl border border-military-paper/10 bg-black/15 px-4 py-3 sm:col-span-2">
-                <div className="text-xs uppercase tracking-[0.25em] text-military-gold">Difficulty / Obtížnost</div>
-                <div className="mt-1 text-base font-semibold sm:text-lg">{difficultyLabel}</div>
+                <div className="text-xs uppercase tracking-[0.25em] text-military-gold">{t((messages) => messages.app.difficulty.label)}</div>
+                <div className="mt-1 text-base font-semibold sm:text-lg">{displayedDifficultyLabel}</div>
               </div>
             </div>
           </div>
@@ -131,7 +137,7 @@ export function GameBoard({
                 <p className="text-xs uppercase tracking-[0.32em] text-military-gold">
                   {t((messages) => messages.armies.opponentCommand)}
                 </p>
-                <h2 className="text-xl font-semibold sm:text-2xl">{opponentName}</h2>
+                <h2 className="text-xl font-semibold sm:text-2xl">{displayedOpponentName}</h2>
               </div>
               <span className="rounded-full border border-military-paper/15 px-3 py-1 text-xs uppercase tracking-[0.2em] text-military-paper/70">
                 {t((messages) => messages.roles[opponentRole])}
@@ -148,7 +154,7 @@ export function GameBoard({
               </div>
             </div>
             <RestAreaStrip
-              label={t((messages) => messages.armies.restArea(opponentName))}
+              label={t((messages) => messages.armies.restArea(displayedOpponentName))}
               restingCards={opponentArmy.resting}
             />
           </div>
@@ -181,7 +187,7 @@ export function GameBoard({
             <section className="max-w-full overflow-hidden rounded-[2rem] border border-[#9b7b3d] bg-[linear-gradient(180deg,rgba(239,230,207,0.08),rgba(0,0,0,0.12))] p-4 sm:p-5">
               <p className="text-xs uppercase tracking-[0.35em] text-military-gold">{t((messages) => messages.board.fieldOrders)}</p>
               <h2 className="mt-2 text-xl font-semibold text-military-paper sm:text-2xl">{t((messages) => messages.board.commandOverview)}</h2>
-              <p className="mt-3 text-sm leading-6 text-military-paper/78">{statusMessage}</p>
+              <p className="mt-3 text-sm leading-6 text-military-paper/78">{displayedStatusMessage}</p>
               <div className="mt-5 rounded-2xl border border-military-paper/15 bg-black/15 px-4 py-4 text-sm leading-6 text-military-paper/72">
                 {phase === 'game-over'
                   ? t((messages) => messages.board.gameOverOverview)
@@ -198,7 +204,7 @@ export function GameBoard({
                 <p className="text-xs uppercase tracking-[0.32em] text-military-gold">
                   {t((messages) => messages.armies.playerCommand)}
                 </p>
-                <h2 className="text-xl font-semibold sm:text-2xl">{playerName}</h2>
+                <h2 className="text-xl font-semibold sm:text-2xl">{displayedPlayerName}</h2>
               </div>
               <span className="rounded-full border border-military-paper/15 px-3 py-1 text-xs uppercase tracking-[0.2em] text-military-paper/70">
                 {t((messages) => messages.roles[playerRole])}
@@ -216,7 +222,7 @@ export function GameBoard({
               </div>
             </div>
 
-            <RestAreaStrip label={t((messages) => messages.armies.restArea(playerName))} restingCards={playerArmy.resting} />
+            <RestAreaStrip label={t((messages) => messages.armies.restArea(displayedPlayerName))} restingCards={playerArmy.resting} />
           </div>
         </section>
       </div>

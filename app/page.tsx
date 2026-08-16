@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ActionHighlight } from '@/components/game/ActionHighlight'
 import { GameBoard } from '@/components/game/GameBoard'
 import { getActivePlayerAction } from '@/components/game/activePlayerAction'
@@ -17,30 +17,28 @@ import type { Difficulty } from '@/lib/game/types'
 
 type GameMode = 'menu' | 'single-player' | 'multiplayer-create' | 'multiplayer-join' | 'multiplayer-game'
 
-const DIFFICULTY_OPTIONS: Array<{
-  value: Difficulty
-  label: string
-  summary: string
-}> = [
-  {
-    value: 'easy',
-    label: 'Easy / Lehká',
-    summary: '2 aces for the player, 2-round rest, one lifetime round redo.',
-  },
-  {
-    value: 'normal',
-    label: 'Normal / Normální',
-    summary: '1 guaranteed ace, 50% chance for a second, standard 2-round rest.',
-  },
-  {
-    value: 'expert',
-    label: 'Expert / Expertní',
-    summary: 'Only 1 player ace and 3-round rest for captured soldiers.',
-  },
-]
+function getDifficultyOptions(t: ReturnType<typeof useLanguage>['t']): Array<{ value: Difficulty; label: string; summary: string }> {
+  return [
+    {
+      value: 'easy',
+      label: t((messages) => messages.app.difficulty.easyLabel),
+      summary: t((messages) => messages.app.difficulty.easySummary),
+    },
+    {
+      value: 'normal',
+      label: t((messages) => messages.app.difficulty.normalLabel),
+      summary: t((messages) => messages.app.difficulty.normalSummary),
+    },
+    {
+      value: 'expert',
+      label: t((messages) => messages.app.difficulty.expertLabel),
+      summary: t((messages) => messages.app.difficulty.expertSummary),
+    },
+  ]
+}
 
-function getDifficultyLabel(difficulty: Difficulty): string {
-  return DIFFICULTY_OPTIONS.find((option) => option.value === difficulty)?.label ?? 'Easy / Lehká'
+function getDifficultyLabel(difficulty: Difficulty, t: ReturnType<typeof useLanguage>['t']): string {
+  return getDifficultyOptions(t).find((option) => option.value === difficulty)?.label ?? t((messages) => messages.app.difficulty.easyLabel)
 }
 
 function DifficultyPicker({
@@ -56,20 +54,23 @@ function DifficultyPicker({
   showCancel: boolean
   highlighted?: boolean
 }) {
+  const { t } = useLanguage()
+  const difficultyOptions = getDifficultyOptions(t)
+
   return (
     <ActionHighlight
       active={highlighted}
       className="max-w-full overflow-hidden rounded-[2rem] border border-[#9b7b3d]"
     >
       <section className="max-w-full bg-[linear-gradient(180deg,rgba(36,49,39,0.98),rgba(20,30,23,0.98))] p-6 text-military-paper shadow-2xl">
-        <p className="text-xs uppercase tracking-[0.35em] text-military-gold">New campaign / Nová hra</p>
-        <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">Choose difficulty / Zvolte obtížnost</h1>
+        <p className="text-xs uppercase tracking-[0.35em] text-military-gold">{t((messages) => messages.app.newCampaign)}</p>
+        <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">{t((messages) => messages.app.chooseDifficulty)}</h1>
         <p className="mt-3 text-sm leading-6 text-military-paper/78">
-          Pick the next opponent advantage before the campaign begins.
+          {t((messages) => messages.app.chooseDifficultyDescription)}
         </p>
 
         <div className="mt-6 grid gap-4">
-          {DIFFICULTY_OPTIONS.map((option) => (
+          {difficultyOptions.map((option) => (
             <button
               key={option.value}
               type="button"
@@ -94,7 +95,7 @@ function DifficultyPicker({
               onClick={onCancel}
               className="min-h-11 rounded-full border border-military-paper/20 bg-black/25 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper transition hover:bg-black/35"
             >
-              Keep current game / Nechat současnou hru
+              {t((messages) => messages.app.keepCurrentGame)}
             </button>
           </div>
         ) : null}
@@ -108,6 +109,49 @@ export default function HomePage() {
   const multiplayerState = useMultiplayerGameState()
   const { language, setLanguage, t } = useLanguage()
   const [gameMode, setGameMode] = useState<GameMode>('menu')
+  const { clearStatusNotice, leaveRoom } = multiplayerState.actions
+  const multiplayerNoticeMessage =
+    multiplayerState.statusNotice === 'opponent-abandoned'
+      ? t((messages) => messages.multiplayer.connectionStatus.opponentAbandoned)
+      : null
+  const hasActiveMultiplayerRoom =
+    Boolean(multiplayerState.roomCode) &&
+    Boolean(multiplayerState.roomStatus) &&
+    multiplayerState.roomStatus !== 'finished' &&
+    multiplayerState.roomStatus !== 'abandoned'
+
+  useEffect(() => {
+    if (!multiplayerState.roomStatus) {
+      return
+    }
+
+    if (gameMode === 'single-player') {
+      return
+    }
+
+    if (multiplayerState.roomStatus === 'playing' || multiplayerState.roomStatus === 'finished') {
+      setGameMode('multiplayer-game')
+      return
+    }
+
+    setGameMode('multiplayer-create')
+  }, [gameMode, multiplayerState.roomStatus])
+
+  useEffect(() => {
+    if (!multiplayerState.statusNotice) {
+      return
+    }
+
+    setGameMode('menu')
+
+    const timeoutId = window.setTimeout(() => {
+      clearStatusNotice()
+    }, 3000)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [clearStatusNotice, multiplayerState.statusNotice])
 
   const totalCards = state.player.available.length + state.player.resting.length + state.npc.available.length + state.npc.resting.length
   const playerRole = state.attackerSide === 'player' ? 'attacker' : 'defender'
@@ -130,11 +174,6 @@ export default function HomePage() {
     canRevealNext,
   })
 
-  // Transition to multiplayer-game when room is playing
-  if ((gameMode === 'multiplayer-create' || gameMode === 'multiplayer-join') && multiplayerState.roomStatus === 'playing') {
-    setGameMode('multiplayer-game')
-  }
-
   if (!isHydrated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
@@ -149,7 +188,12 @@ export default function HomePage() {
   if (gameMode === 'menu') {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
-        <div className="w-full max-w-3xl">
+        <div className="flex w-full max-w-3xl flex-col gap-4">
+          <ConnectionStatusBanner
+            isVisible={Boolean(multiplayerNoticeMessage)}
+            message={multiplayerNoticeMessage ?? ''}
+            tone="critical"
+          />
           <MainMenu
             onSelectSinglePlayer={() => setGameMode('single-player')}
             onSelectMultiplayer={() => setGameMode('multiplayer-create')}
@@ -163,7 +207,28 @@ export default function HomePage() {
   // Multiplayer create room mode
   if (gameMode === 'multiplayer-create') {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
+      <main className="relative flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(76,98,71,0.28),_transparent_28%),linear-gradient(180deg,#233127_0%,#17211a_100%)] px-6 text-military-paper">
+        {hasActiveMultiplayerRoom ? (
+          <div className="absolute left-0 right-0 top-0 z-10 mx-auto flex w-full max-w-7xl justify-end px-3 pt-3 sm:px-5 lg:px-8">
+            {hasActiveMultiplayerRoom ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!window.confirm(t((messages) => messages.multiplayer.game.confirmLeaveGame))) {
+                    return
+                  }
+
+                  setGameMode('menu')
+                  await leaveRoom()
+                }}
+                className="min-h-11 rounded-full border border-military-paper/20 bg-black/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper shadow-lg transition hover:bg-black/40"
+              >
+                {t((messages) => messages.multiplayer.game.leaveGame)}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="w-full max-w-3xl">
           <CreateRoomScreen
             onCreateRoom={async (nickname) => {
@@ -193,7 +258,7 @@ export default function HomePage() {
               if (result.ok) {
                 return { ok: true }
               } else {
-                return { ok: false, reason: result.reason || 'Failed to join room' }
+                return { ok: false, reason: result.reason }
               }
             }}
           />
@@ -235,19 +300,12 @@ export default function HomePage() {
     const mpIsDefenderHuman = mpState.attackerSide !== 'player'
     const mpSelectionRequiredCount = mpState.phase === 'selecting' ? computeSlotCount(mpState) : 0
     const mpCombat = mpState.combat
-    const mpCanRevealNext =
-      !mpRoundResult &&
-      mpState.phase === 'combat' &&
-      mpState.attackerSide === 'player' &&
-      !mpCombat?.revealedCard &&
-      Boolean(mpCombat?.attackerQueue.length)
-
     return (
       <div className="relative">
         <div className="absolute left-0 right-0 top-0 z-10 mx-auto flex w-full max-w-7xl flex-col gap-3 px-3 pt-3 sm:px-5 lg:px-8">
           <div className="flex justify-between items-center gap-3">
             <ConnectionStatusBanner
-              isPeerConnected={multiplayerState.isPeerConnected}
+              isVisible={!multiplayerState.isPeerConnected}
               message={t((msg) => msg.multiplayer.connectionStatus.peerDisconnected)}
             />
             <div className="flex items-center gap-1 rounded-full border border-military-paper/20 bg-black/30 p-1 text-xs font-bold uppercase tracking-[0.18em] text-military-paper shadow-lg">
@@ -278,13 +336,17 @@ export default function HomePage() {
 
             <button
               type="button"
-              onClick={() => {
-                multiplayerState.actions.leaveRoom()
+              onClick={async () => {
+                if (!window.confirm(t((messages) => messages.multiplayer.game.confirmLeaveGame))) {
+                  return
+                }
+
                 setGameMode('menu')
+                await leaveRoom()
               }}
               className="min-h-11 rounded-full border border-military-paper/20 bg-black/30 px-5 py-3 text-xs font-bold uppercase tracking-[0.24em] text-military-paper shadow-lg transition hover:bg-black/40"
             >
-              Back to menu
+              {t((messages) => messages.multiplayer.game.leaveGame)}
             </button>
           </div>
 
@@ -294,8 +356,8 @@ export default function HomePage() {
                 <p className="text-xs font-bold uppercase tracking-[0.28em] text-[#7a5c22]">{t((messages) => messages.app.gameOver)}</p>
                 <h2 className="mt-1 text-xl font-semibold sm:text-2xl">
                   {mpState.winner === 'player'
-                    ? 'You win!'
-                    : 'Your opponent wins!'}
+                    ? t((messages) => messages.multiplayer.game.youWin)
+                    : t((messages) => messages.multiplayer.game.opponentWins)}
                 </h2>
               </section>
             </ActionHighlight>
@@ -314,31 +376,35 @@ export default function HomePage() {
           isDefenderHuman={mpIsDefenderHuman}
           playerRole={mpState.attackerSide === 'player' ? 'attacker' : 'defender'}
           phase={mpState.phase}
-          playerName={multiplayerState.ownNickname || 'You'}
-          opponentName={multiplayerState.opponentNickname || 'Opponent'}
-          roundLabel={`${multiplayerState.ownNickname || 'You'} ${mpState.attackerSide === 'player' ? 'attacks' : 'defends'}`}
+          playerName={multiplayerState.ownNickname || t((messages) => messages.multiplayer.game.you)}
+          opponentName={multiplayerState.opponentNickname || t((messages) => messages.multiplayer.game.opponent)}
+          roundLabel={t((messages) =>
+            messages.multiplayer.game.roundLabel(
+              multiplayerState.ownNickname || messages.multiplayer.game.you,
+              mpState.attackerSide === 'player',
+            ),
+          )}
           phaseLabel={t((messages) => messages.app.phaseLabel(mpState.phase, Boolean(mpRoundResult)))}
           statusMessage={
             mpRoundResult
               ? t((messages) => messages.app.status.roundResult)
               : mpState.phase === 'game-over'
-                ? 'Game over'
+                ? t((messages) => messages.multiplayer.game.gameOverStatus)
                 : mpState.phase === 'selecting'
                   ? mpIsDefenderHuman
-                    ? `Select ${mpSelectionRequiredCount} defender cards`
-                    : 'Opponent is attacking'
+                    ? t((messages) => messages.multiplayer.game.selectDefenderCards(mpSelectionRequiredCount))
+                    : t((messages) => messages.multiplayer.game.opponentIsAttacking)
                   : mpIsDefenderHuman
-                    ? 'Choose a defender'
-                    : 'Opponent is defending'
+                    ? t((messages) => messages.multiplayer.game.chooseDefender)
+                    : t((messages) => messages.multiplayer.game.opponentIsDefending)
           }
-          difficultyLabel="Online"
+          difficultyLabel={t((messages) => messages.multiplayer.game.online)}
           roundResult={mpRoundResult}
           onSelectDefenderCard={multiplayerState.actions.selectDefenderCard}
           onConfirmSelection={(cardIds) => multiplayerState.actions.confirmDefenderSelection(cardIds)}
-          onRevealNext={multiplayerState.actions.revealNextAttacker}
           onRedoRound={() => {}}
           onDismissRoundResult={multiplayerState.actions.dismissRoundResult}
-          canRevealNext={mpCanRevealNext}
+          canRevealNext={false}
           highlightPlayerHandSelector={false}
           highlightDefenderPool={false}
           highlightRevealNext={false}
@@ -445,7 +511,7 @@ export default function HomePage() {
         roundLabel={t((messages) => messages.app.roundLabel(state.attackerSide))}
         phaseLabel={t((messages) => messages.app.phaseLabel(state.phase, Boolean(roundResult)))}
         statusMessage={statusMessage}
-        difficultyLabel={getDifficultyLabel(state.difficulty)}
+        difficultyLabel={getDifficultyLabel(state.difficulty, t)}
         roundResult={
           roundResult
             ? {

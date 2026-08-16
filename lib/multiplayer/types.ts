@@ -1,6 +1,6 @@
 import type { Card, CombatState as SinglePlayerCombatState, Duel, ResolvedDuel } from '@/lib/game/types'
 
-export type RoomStatus = 'waiting' | 'dealing' | 'playing' | 'finished'
+export type RoomStatus = 'waiting' | 'dealing' | 'playing' | 'finished' | 'abandoned'
 export type PlayerSlot = 'a' | 'b'
 
 export interface PublicPlayerState {
@@ -41,6 +41,7 @@ export interface RoomRow {
   attacker_side: PlayerSlot | null
   public_state: PublicState | null
   winner: PlayerSlot | null
+  abandoned_by?: string | null
 }
 
 export interface PlayerHandRow {
