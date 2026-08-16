@@ -4,9 +4,12 @@
 
 Package the existing web game (deployed at `https://cardgame-eta-five.vercel.app/`)
 as an installable Android app that opens the live site full-screen, with no
-browser chrome (no address bar / status indicators), so it feels like a
-native app. Distribution for now is sideload (share the APK directly);
-the approach must not preclude publishing to Google Play later.
+Chrome address bar, so it feels like a native app. Note: the TWA hides the
+*browser* URL bar once Digital Asset Links verification succeeds, but the
+Android system status bar and navigation bar remain governed by normal
+Android/Chrome theming (`theme_color` tints the status bar; it is not
+removed). Distribution for now is sideload (share the APK directly); the
+approach must not preclude publishing to Google Play later.
 
 ## Chosen approach: Trusted Web Activity (TWA) via PWABuilder
 
@@ -29,11 +32,20 @@ project.
 
 1. **Web App Manifest** (`public/manifest.json`)
    - `name`: "Bitevní karty", `short_name`: "Bitevní karty"
+   - `id`: `/` (stable app identity across manifest edits, recommended by
+     the current Web App Manifest spec and expected by PWABuilder)
    - `display`: `standalone`
    - `background_color`: `#17211a`, `theme_color`: `#17211a`
    - `start_url`: `/`
-   - `icons`: multiple PNG sizes (48, 72, 96, 144, 192, 512px), including
-     one `512x512` marked `"purpose": "maskable"` for adaptive icon support
+   - `scope`: `/` (explicit, so PWABuilder/Chrome don't have to infer it
+     from `start_url`)
+   - `icons`: multiple PNG sizes (48, 72, 96, 144, 192, 512px)
+     - at least one `512x512` entry with `"purpose": "any"`
+     - a separate `512x512` entry with `"purpose": "maskable"`, where the
+       artwork's important content is kept within the center ~80% "safe
+       zone" (maskable icons get cropped to varying shapes - circle,
+       squircle, etc. - by different Android launchers, so anything near
+       the edges may be clipped)
 2. **App icon set**
    - A new simple Napoleonic-styled icon (e.g. laurel wreath + crossed
      sabres or an ace motif in the game's gold/dark-green palette) will be
@@ -48,13 +60,41 @@ project.
      their home screen directly from a mobile browser, independent of the
      Android APK).
 4. **`.well-known/assetlinks.json`**
-   - Added as a static route/file once PWABuilder generates the signed
-     Android package and provides the app's SHA-256 signing certificate
-     fingerprint. This file is what allows the TWA to run with zero
-     browser UI (Digital Asset Links verification). Until this file is
-     live and matches, the TWA falls back to showing a URL bar.
+   - Added at `public/.well-known/assetlinks.json` (served statically at
+     `https://cardgame-eta-five.vercel.app/.well-known/assetlinks.json`)
+     once PWABuilder generates the signed Android package and provides
+     the app's SHA-256 signing certificate fingerprint. This file is what
+     allows the TWA to run with the address bar hidden (Digital Asset
+     Links verification). Until this file is live, publicly reachable,
+     and its contents match the installed app's signature, the TWA falls
+     back to showing a URL bar.
+   - Required JSON shape (one entry per signing key that must be
+     trusted):
+     ```json
+     [{
+       "relation": ["delegate_permission/common.handle_all_urls"],
+       "target": {
+         "namespace": "android_app",
+         "package_name": "cz.hradecak.bitevnikarty",
+         "sha256_cert_fingerprints": ["<FINGERPRINT_FROM_PWABUILDER>"]
+       }
+     }]
+     ```
    - This step depends on output from the external PWABuilder step (see
      Process below), so the fingerprint value is not known until then.
+   - **Keystore/signing-key lifecycle:** PWABuilder generates and signs
+     the APK with a keystore file it produces during that process. That
+     keystore file must be downloaded and kept safe (e.g. a password
+     manager or private backup, not committed to this public repo) -
+     losing it means future app updates can't be signed with the same
+     key, which would require a fresh `assetlinks.json` fingerprint and
+     effectively a new app identity for already-installed users.
+   - **Note for a later Play Store publish:** if/when this app is
+     uploaded to Google Play, Play App Signing re-signs the app with an
+     Play-managed key whose fingerprint differs from the one used for
+     sideloaded APKs. At that point a second fingerprint entry (or a
+     second array element) must be added to `assetlinks.json` alongside
+     the original sideload one, so both signed variants remain trusted.
 
 ## Explicitly out of scope (for this iteration)
 
@@ -76,9 +116,14 @@ project.
    package name `cz.hradecak.bitevnikarty`.
 3. PWABuilder provides the SHA-256 fingerprint for the generated signing
    key; add this to `.well-known/assetlinks.json` in the repo and deploy.
-4. Install the downloaded APK on a device to verify full-screen (no URL
-   bar) behavior once Digital Asset Links verification succeeds
-   (may take a short propagation delay after deploying step 3).
+4. Install the downloaded APK on a device to verify the address bar
+   disappears once Digital Asset Links verification succeeds (may take a
+   short propagation delay after deploying step 3). Also verify that
+   tapping any link that points to a different origin (e.g. an external
+   link, if the game ever adds one) correctly opens in a regular browser
+   tab/Custom Tab rather than staying inside the TWA - this is expected
+   TWA behavior (it only claims the verified origin's URLs) and should
+   not be treated as a bug.
 
 ## Testing / verification plan
 
@@ -89,8 +134,17 @@ project.
   errors).
 - Visual check that generated icons render correctly at small sizes
   (legible at 48x48, the smallest home-screen icon size on some Android
-  launchers).
-- Final end-to-end verification (TWA installs and opens full-screen) is
-  a manual, outside-the-repo step performed by the user on an Android
-  device per the Process section above, since it depends on PWABuilder
-  and real device installation.
+  launchers), and that the maskable icon's important content survives a
+  circular crop preview (Chrome DevTools' manifest panel has a maskable
+  preview toggle for this).
+- After deploying `.well-known/assetlinks.json`, confirm it is publicly
+  reachable and returns valid JSON, e.g. via
+  `curl -i https://cardgame-eta-five.vercel.app/.well-known/assetlinks.json`
+  (must be served with a JSON-compatible content type and without
+  requiring auth/redirects, since Digital Asset Links verification
+  fetches it directly).
+- Final end-to-end verification (TWA installs, address bar hides, and
+  off-origin links correctly break out to a normal browser) is a manual,
+  outside-the-repo step performed by the user on an Android device per
+  the Process section above, since it depends on PWABuilder and real
+  device installation.
