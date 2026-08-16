@@ -277,6 +277,50 @@ describe('useMultiplayerGameState combat reveals', () => {
     })
   })
 
+  it('caps attackerSlotsTotal at the defender\'s available (non-resting) card count, not available+resting', async () => {
+    // Regression test: attackerSlotsTotal was computed as
+    // min(attackerDrawCount, defenderAvailableCount + defenderRestingCount),
+    // but defender.available.length (not available+resting) is what the
+    // defender can actually select from (mirrors single-player's
+    // computeSlotCount, which only counts `available`). Once a few rounds
+    // pass and captured troops start resting, defenderAvailableCount can
+    // drop below 3 while resting count keeps the incorrect total >= 3. The
+    // attacker would then draw/reveal 3 cards while the defender could only
+    // commit 2, permanently desyncing attackerCardsRevealed.length from
+    // attackerSlotsTotal and softlocking the round (no round-summary popup).
+    const roomData = createRoomRow({
+      attacker_side: 'a',
+      public_state: createPublicState({
+        phase: 'selecting',
+        combat: null,
+        playerB: {
+          availableCount: 2,
+          resting: [
+            { card: createCard('resting-1', 9), roundsRemaining: 1 },
+            { card: createCard('resting-2', 7), roundsRemaining: 2 },
+          ],
+        },
+      }),
+    })
+    const handData = createHandRow({
+      player_uid: 'uid-a',
+      available: [createCard('a-1', 4), createCard('a-2', 5), createCard('a-3', 6), createCard('a-4', 8)],
+      pending_attack_queue: null,
+    })
+
+    const { roomUpdates } = await mountHookWithRoom(roomData, handData)
+
+    await waitFor(() => {
+      expect(roomUpdates.length).toBeGreaterThan(0)
+    })
+
+    const combatUpdate = roomUpdates.find(
+      (update) => (update.public_state as PublicState)?.combat !== undefined,
+    )
+
+    expect((combatUpdate?.public_state as PublicState)?.combat?.attackerSlotsTotal).toBe(2)
+  })
+
   describe('useMultiplayerGameState round-summary reconciliation', () => {
     beforeEach(() => {
       jest.useFakeTimers()

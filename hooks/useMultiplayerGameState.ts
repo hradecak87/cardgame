@@ -753,7 +753,12 @@ export function useMultiplayerGameState(): {
       // BUG FIX #3: Dynamically determine defender side (opposite of attacker_side)
       const defenderSlot = room.roomData?.attacker_side === 'a' ? 'b' : 'a'
       const defenderStats = defenderSlot === 'a' ? room.publicState.playerA : room.publicState.playerB
-      const defenderTotal = defenderStats.availableCount + defenderStats.resting.length
+      // BUG FIX #4: Only the defender's currently *available* cards can be selected for
+      // defense - resting cards can't play, so they must not inflate the slot cap
+      // (previously counted availableCount + resting.length, which mismatched
+      // computeSlotCount()'s selection-required count once troops started resting
+      // and permanently softlocked the round).
+      const defenderTotal = defenderStats.availableCount
       const slotCount = Math.min(room.ownHand.available.length + room.ownHand.pending_attack_queue.length, defenderTotal)
 
       const initialCombat = {
@@ -835,7 +840,8 @@ export function useMultiplayerGameState(): {
         // BUG FIX #3: Dynamically determine defender side (opposite of attacker_side)
         const defenderSlot = room.roomData?.attacker_side === 'a' ? 'b' : 'a'
         const defenderStats = defenderSlot === 'a' ? room.publicState!.playerA : room.publicState!.playerB
-        const defenderTotal = defenderStats.availableCount + defenderStats.resting.length
+        // BUG FIX #4: see matching comment above - resting cards can't be selected for defense
+        const defenderTotal = defenderStats.availableCount
         const slotCount = Math.min(drawnCards.length, defenderTotal)
 
         const initialCombat = {
