@@ -355,6 +355,55 @@ export function useMultiplayerGameState(): {
     }
   }, [room.status, room.roomData, room.ownSlot, room.roomId])
 
+  // Realtime-fallback polling: postgres_changes events can occasionally be
+  // missed (dropped WebSocket frame, brief disconnect that reconnects
+  // without replaying missed events, etc.), which previously left a client
+  // stuck showing a stale status (e.g. still on the "waiting for player"
+  // screen after the room actually finished dealing) until a manual page
+  // refresh re-ran connectToRoom's one-shot fetch. This periodically
+  // re-fetches the authoritative room + own hand rows directly as a
+  // cheap, idempotent safety net on top of (not a replacement for)
+  // Realtime, self-healing within a few seconds instead of requiring a
+  // reload.
+  useEffect(() => {
+    if (!room.roomId || !room.ownUid || isTerminalRoomStatus(room.status)) {
+      return
+    }
+
+    const pollRoomId = room.roomId
+    const pollOwnUid = room.ownUid
+
+    const intervalId = setInterval(async () => {
+      const [freshRoom, freshHand] = await Promise.all([
+        fetchRoom(pollRoomId),
+        fetchPlayerHand(pollRoomId, pollOwnUid),
+      ])
+
+      if (freshRoom) {
+        if (freshRoom.status === 'abandoned') {
+          const wasAbandonedByOpponent = Boolean(freshRoom.abandoned_by && freshRoom.abandoned_by !== pollOwnUid)
+          clearRoomState(wasAbandonedByOpponent ? 'opponent-abandoned' : null)
+          return
+        }
+
+        updateRoom({
+          roomData: freshRoom,
+          publicState: freshRoom.public_state,
+          version: freshRoom.version,
+          status: freshRoom.status,
+        })
+      }
+
+      if (freshHand) {
+        updateRoom({ ownHand: freshHand })
+      }
+    }, 3000)
+
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [room.roomId, room.ownUid, room.status, fetchRoom, fetchPlayerHand, updateRoom, clearRoomState])
+
   // Reconciliation effect - applies round end, publishes results, and transitions to next round
   useEffect(() => {
     if (!room.publicState || !room.ownHand || !room.ownSlot || !room.roomId || !room.roomData) {
@@ -529,6 +578,7 @@ export function useMultiplayerGameState(): {
             attackerCardsRevealed: publicState.combat.attackerCardsRevealed,
             revealedCard: finalizedCombat.revealedCard,
             defenderCommitted: publicState.combat.defenderCommitted,
+            defenderPoolCards: publicState.combat.defenderPoolCards ?? [],
             pendingTies: finalizedCombat.pendingTies,
             resolvedDuels: finalizedCombat.resolvedDuels,
           },
@@ -709,6 +759,7 @@ export function useMultiplayerGameState(): {
         attackerCardsRevealed: [],
         revealedCard: null,
         defenderCommitted: false,
+        defenderPoolCards: [],
         pendingTies: [],
         resolvedDuels: [],
       }
@@ -790,6 +841,7 @@ export function useMultiplayerGameState(): {
           attackerCardsRevealed: [],
           revealedCard: null,
           defenderCommitted: false,
+          defenderPoolCards: [],
           pendingTies: [],
           resolvedDuels: [],
         }
@@ -968,6 +1020,7 @@ export function useMultiplayerGameState(): {
         }
         if (updates.combat) {
           updates.combat.defenderCommitted = true
+          updates.combat.defenderPoolCards = room.ownHand.pending_defender_pool
         }
 
         writeWithVersionGuard(async (expectedVersion) => {
@@ -1024,6 +1077,7 @@ export function useMultiplayerGameState(): {
               attackerCardsRevealed: [],
               revealedCard: null,
               defenderCommitted: false,
+              defenderPoolCards: [],
               pendingTies: [],
               resolvedDuels: [],
             },
@@ -1031,6 +1085,7 @@ export function useMultiplayerGameState(): {
 
           if (updates.combat) {
             updates.combat.defenderCommitted = true
+            updates.combat.defenderPoolCards = selectedCards
           }
 
           const writeResult = await writeWithVersionGuard(async (expectedVersion) => {

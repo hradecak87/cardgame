@@ -4,7 +4,6 @@ import { motion } from 'framer-motion'
 import type { Card, GamePhase, ResolvedDuel } from '@/lib/game/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ActionHighlight } from './ActionHighlight'
-import { HiddenCardBack } from './HiddenCardBack'
 import { PlayingCard } from './PlayingCard'
 
 interface BattleSlotsProps {
@@ -162,24 +161,13 @@ export function BattleSlots({
                       animate={{ opacity: 1, y: 0 }}
                       className="max-w-full"
                     >
-                      {isDefenderHuman ? (
-                        <PlayingCard
-                          card={card}
-                          size="md"
-                          onClick={
-                            defenderCanAct ? () => onSelectDefenderCard?.(card.id) : undefined
-                          }
-                        />
-                      ) : (
-                        // These are count-only placeholders for the
-                        // opponent's pool: real identities are private and
-                        // must stay hidden. Rendered as a plain static
-                        // card back (no 3D flip) to avoid the "rotateY
-                        // flip renders mirrored instead of hidden" bug
-                        // some mobile browsers/WebViews have with
-                        // PlayingCard's faceDown transform.
-                        <HiddenCardBack size="md" />
-                      )}
+                      <PlayingCard
+                        card={card}
+                        size="md"
+                        onClick={
+                          defenderCanAct ? () => onSelectDefenderCard?.(card.id) : undefined
+                        }
+                      />
                     </motion.div>
                   ))
                 )}

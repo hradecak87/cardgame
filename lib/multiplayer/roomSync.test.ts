@@ -150,8 +150,9 @@ describe('buildGameStateView', () => {
     expect(view.combat?.attackerQueue).toHaveLength(2)
   })
 
-  it('gives the attacker a count-only placeholder defenderPool matching remaining slots', () => {
+  it("gives the attacker the defender's committed pool cards from the public state, minus already-used ones", () => {
     const defenderCardUsed = card('J-hearts', 5)
+    const defenderCardRemaining = card('Q-hearts', 6)
     const publicState = basePublicState({
       phase: 'combat',
       combat: {
@@ -159,6 +160,7 @@ describe('buildGameStateView', () => {
         attackerCardsRevealed: [card('7-hearts')],
         revealedCard: null,
         defenderCommitted: true,
+        defenderPoolCards: [defenderCardUsed, defenderCardRemaining],
         pendingTies: [],
         resolvedDuels: [
           { duel: { attackerCard: card('7-hearts'), defenderCard: defenderCardUsed }, winner: 'defender' },
@@ -168,7 +170,25 @@ describe('buildGameStateView', () => {
 
     const view = buildGameStateView(publicState, 'a', baseHand(), 'a')
 
-    expect(view.combat?.defenderPool).toHaveLength(2)
+    expect(view.combat?.defenderPool).toEqual([defenderCardRemaining])
+  })
+
+  it('gives the attacker an empty defenderPool before the defender has committed', () => {
+    const publicState = basePublicState({
+      phase: 'combat',
+      combat: {
+        attackerSlotsTotal: 3,
+        attackerCardsRevealed: [card('7-hearts')],
+        revealedCard: null,
+        defenderCommitted: false,
+        pendingTies: [],
+        resolvedDuels: [],
+      },
+    })
+
+    const view = buildGameStateView(publicState, 'a', baseHand(), 'a')
+
+    expect(view.combat?.defenderPool).toEqual([])
   })
 })
 

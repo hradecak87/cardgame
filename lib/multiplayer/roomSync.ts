@@ -66,22 +66,22 @@ function buildCombatView(
     ...publicState.combat.pendingTies.map((duel) => duel.defenderCard.id),
   ])
   const remainingAttackerCount = publicState.combat.attackerSlotsTotal - publicState.combat.attackerCardsRevealed.length
-  const consumedDefenderCount = publicState.combat.resolvedDuels.length + publicState.combat.pendingTies.length
-  const remainingDefenderCount = publicState.combat.attackerSlotsTotal - consumedDefenderCount
 
   // Only the attacker knows the real identity of its own not-yet-revealed
   // cards; the defender only ever needs isCombatFinished's *length* check,
-  // so it gets count-only placeholders. Symmetrically, only the defender
-  // knows the real identity of its remaining defenderPool picks; the
-  // attacker only ever needs the count, never the identities (it can't
-  // pick from the defender's pool).
+  // so it gets count-only placeholders.
   return {
     attackerQueue: isOwnAttacker
       ? (ownHand.pending_attack_queue ?? []).filter((card) => !revealedAttackerCardIds.has(card.id))
       : placeholderCards(remainingAttackerCount, `${ownSlot}-attacker-queue`),
     revealedCard: publicState.combat.revealedCard,
+    // Per game rules only the attacker's queue is hidden; the defender's
+    // chosen pool is legitimately visible to both sides once committed
+    // (see PublicCombatState.defenderPoolCards). The attacker's view uses
+    // the publicly-broadcast real cards instead of a count-only
+    // placeholder, and is empty until the defender actually commits.
     defenderPool: isOwnAttacker
-      ? placeholderCards(remainingDefenderCount, `${ownSlot}-defender-pool`)
+      ? (publicState.combat.defenderPoolCards ?? []).filter((card) => !usedDefenderCardIds.has(card.id))
       : (ownHand.pending_defender_pool ?? []).filter((card) => !usedDefenderCardIds.has(card.id)),
     pendingTies: publicState.combat.pendingTies,
     resolvedDuels: publicState.combat.resolvedDuels,

@@ -13,6 +13,13 @@ export interface PublicCombatState {
   attackerCardsRevealed: Card[]
   revealedCard: Card | null
   defenderCommitted: boolean
+  // Real identities of the defender's chosen pool, broadcast publicly once
+  // committed. Per the game's rules only the *attacker's* queue is meant
+  // to stay hidden (revealed one at a time as combat proceeds); the
+  // defender's chosen cards are legitimately visible to both sides as
+  // soon as they're picked, same as in single-player. Empty/undefined
+  // before the defender commits.
+  defenderPoolCards?: Card[]
   pendingTies: Duel[]
   resolvedDuels: ResolvedDuel[]
 }
