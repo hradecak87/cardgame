@@ -832,6 +832,63 @@ export function useMultiplayerGameState(): {
       return
     }
 
+    // BUG FIX #11: if either side has zero available (non-resting) cards
+    // this round, no combat is possible - single-player's equivalent
+    // (computeSlotCount() === 0) skips the round entirely without ever
+    // entering combat/card-selection: it just ages resting cards and
+    // re-checks for a winner. Previously the attacker still drew cards
+    // into pending_attack_queue and published a combat state with
+    // attackerSlotsTotal: 0 while `phase` stayed 'selecting' - nothing
+    // ever advances phase to 'combat' (that requires the defender to
+    // confirm a selection, but there's nothing to confirm with zero
+    // cards) or to 'round-summary', permanently deadlocking the round
+    // whenever a player's active army ran dry while cards still sat
+    // resting (exactly the "almost out of cards, 2 still resting"
+    // end-game scenario). Fix: publish an already-resolved, empty combat
+    // straight into 'round-summary' so it flows through the same
+    // Stage A/B/shared-conclusion pipeline that ages resting cards and
+    // advances the round for a real 0-duel outcome.
+    const defenderSlotForEmptyCheck = room.roomData?.attacker_side === 'a' ? 'b' : 'a'
+    const defenderStatsForEmptyCheck =
+      defenderSlotForEmptyCheck === 'a' ? room.publicState.playerA : room.publicState.playerB
+    const attackerAvailableThisRound = room.ownHand.available.length + (room.ownHand.pending_attack_queue?.length ?? 0)
+
+    if (attackerAvailableThisRound === 0 || defenderStatsForEmptyCheck.availableCount === 0) {
+      const emptyCombat = {
+        attackerSlotsTotal: 0,
+        attackerCardsRevealed: [],
+        revealedCard: null,
+        defenderCommitted: true,
+        defenderPoolCards: [],
+        pendingTies: [],
+        resolvedDuels: [],
+      }
+
+      const updates: Partial<PublicState> = {
+        ...room.publicState,
+        phase: 'round-summary',
+        combat: emptyCombat,
+      }
+
+      const supabase = getSupabaseClient()
+      writeWithVersionGuard(async (expectedVersion) => {
+        const result = await supabase
+          .from('rooms')
+          .update({
+            public_state: updates,
+            version: room.version + 1,
+          })
+          .eq('id', room.roomId)
+          .eq('version', expectedVersion)
+
+        return { affectedRows: result.status === 204 ? 1 : 0 }
+      }, room.version).catch((error) => {
+        console.error('Error publishing empty-round skip:', error)
+      })
+
+      return
+    }
+
     // Check if already drew
     if (room.ownHand.pending_attack_queue) {
       // Already drew; publish initial combat state if not already published

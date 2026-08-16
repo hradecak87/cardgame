@@ -361,6 +361,56 @@ describe('useMultiplayerGameState combat reveals', () => {
     expect((combatUpdate?.public_state as PublicState)?.combat?.attackerSlotsTotal).toBe(3)
   })
 
+  it('skips straight to round-summary when the defender has zero available cards, instead of deadlocking in selecting', async () => {
+    // Regression test: single-player's equivalent of a zero-slot round
+    // (computeSlotCount() === 0, e.g. the defender's active army is
+    // empty but they still have cards resting) skips combat entirely -
+    // it ages resting cards and re-checks for a winner without ever
+    // entering card-selection. Multiplayer had no equivalent: the
+    // attacker still drew cards and published a combat object with
+    // attackerSlotsTotal: 0, but `phase` stayed 'selecting' forever -
+    // transitioning to 'combat' requires the defender to *confirm a
+    // selection*, and there's nothing to confirm with zero cards. The
+    // round (and the whole game) deadlocked permanently right at the
+    // "down to the last few resting cards" end-game stage.
+    const roomData = createRoomRow({
+      attacker_side: 'a',
+      public_state: createPublicState({
+        phase: 'selecting',
+        combat: null,
+        playerB: {
+          availableCount: 0,
+          resting: [
+            { card: createCard('resting-1', 7), roundsRemaining: 1 },
+            { card: createCard('resting-2', 6), roundsRemaining: 1 },
+          ],
+        },
+      }),
+    })
+    const handData = createHandRow({
+      player_uid: 'uid-a',
+      available: [createCard('a-1', 4), createCard('a-2', 5)],
+      pending_attack_queue: null,
+    })
+
+    const { roomUpdates } = await mountHookWithRoom(roomData, handData)
+
+    await waitFor(() => {
+      expect(roomUpdates.length).toBeGreaterThan(0)
+    })
+
+    expect(roomUpdates[0]).toMatchObject({
+      public_state: {
+        phase: 'round-summary',
+        combat: {
+          attackerSlotsTotal: 0,
+          attackerCardsRevealed: [],
+          resolvedDuels: [],
+        },
+      },
+    })
+  })
+
   describe('useMultiplayerGameState round-summary reconciliation', () => {
     beforeEach(() => {
       jest.useFakeTimers()
