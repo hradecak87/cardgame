@@ -362,6 +362,100 @@ describe('useMultiplayerGameState combat reveals', () => {
       })
     })
 
+    it('does not let a stale in-flight reconcile pass clobber fresher state that arrived from Realtime while its write was pending', async () => {
+      // Regression test for BUG FIX #7: the reconciliation effect's cleanup
+      // set `cancelled = true` on every re-run, but reconcile() never
+      // actually checked it before calling updateRoom() on a successful
+      // write. If this client's own write (e.g. Stage B's round-completion
+      // publish) was slow, and a fresher update from the OTHER player
+      // arrived via Realtime in the meantime (advancing room.version and
+      // publicState further), the stale call would still resolve and
+      // clobber the newer local state with its own now-outdated computed
+      // values once its await finally settled - discarding the opponent's
+      // progress and potentially permanently softlocking the round
+      // transition (the DB itself could end up inconsistent with what any
+      // client believed, in a way not fixed by a page refresh once other
+      // writes started failing their version guard against the clobbered
+      // version).
+      const roomData = createRoomRow({
+        public_state: createPublicState({
+          phase: 'round-summary',
+          roundSummaryDismissedBy: { a: true, b: true },
+        }),
+      })
+      const handData = createHandRow({
+        player_uid: 'uid-a',
+        last_applied_round: 1, // Stage A already applied; only Stage B should fire
+      })
+
+      let releaseFirstWrite: (() => void) | null = null
+      const firstWriteGate = new Promise<void>((resolve) => {
+        releaseFirstWrite = resolve
+      })
+      let writeCallCount = 0
+
+      const { client, roomUpdates, emitRoomChange } = createMockSupabase(roomData, handData)
+      mockedEnsureAnonymousSession.mockResolvedValue(handData.player_uid)
+      mockedGetSupabaseClient.mockReturnValue(client as never)
+      mockedWriteWithVersionGuard.mockImplementation(async (update, expectedVersion) => {
+        writeCallCount += 1
+        if (writeCallCount === 1) {
+          await firstWriteGate
+        }
+        await update(expectedVersion)
+        return { ok: true }
+      })
+
+      window.localStorage.setItem(ROOM_CODE_STORAGE_KEY, roomData.code)
+
+      const hook = renderHook(() => useMultiplayerGameState())
+
+      await waitFor(() => {
+        expect(hook.result.current.roomCode).toBe(roomData.code)
+      })
+
+      await waitFor(() => {
+        expect(writeCallCount).toBeGreaterThanOrEqual(1)
+      })
+
+      // While our own Stage B write is still pending, simulate the OTHER
+      // player's shared-conclusion write already landing via Realtime -
+      // advancing further than our own in-flight write's stale closure
+      // knows about.
+      const fresherPublicState = createPublicState({
+        phase: 'selecting',
+        roundNumber: 2,
+        roundSummaryDismissedBy: { a: false, b: false },
+        roundEndAppliedBy: { a: false, b: false },
+        combat: null,
+      })
+      const fresherRoomData = createRoomRow({
+        version: roomData.version + 5,
+        attacker_side: 'b',
+        public_state: fresherPublicState,
+      })
+
+      await act(async () => {
+        emitRoomChange(fresherRoomData)
+      })
+
+      await waitFor(() => {
+        expect(hook.result.current.publicPhase).toBe('selecting')
+      })
+
+      // Now let the stale Stage B write finally resolve.
+      await act(async () => {
+        releaseFirstWrite?.()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      // The stale pass must not have clobbered the fresher externally
+      // arrived state back to 'round-summary'.
+      expect(hook.result.current.publicPhase).toBe('selecting')
+      expect(roomUpdates.length).toBeGreaterThanOrEqual(1)
+    })
+
     it('sends both the winner\'s own fighting card and the captured enemy card to rest, not just the captured card', async () => {
       // Regression test: per game rules ("hráč si všechny vyhrané vojáky
       // včetně svých po boji dá do odpočívárny" - the winner rests ALL

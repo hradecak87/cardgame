@@ -539,6 +539,18 @@ export function useMultiplayerGameState(): {
           return { affectedRows: result.status === 204 ? 1 : 0 }
         }, version)
 
+        // BUG FIX #7: `cancelled` was set by the effect's cleanup on every
+        // re-run (e.g. a newer room.version arriving mid-await) but was
+        // never actually checked here. A stale in-flight reconcile() call
+        // could finish awaiting *after* a fresher call had already
+        // advanced local state, and then clobber it with its own
+        // now-outdated computed values via updateRoom - discarding
+        // progress the fresher pass made. Bail out before touching local
+        // state if a newer pass has since started.
+        if (cancelled) {
+          return
+        }
+
         if (!writeResult.ok) {
           console.error('Error publishing round completion:', writeResult)
         } else {
@@ -604,8 +616,37 @@ export function useMultiplayerGameState(): {
           return { affectedRows: result.status === 204 ? 1 : 0 }
         }, version)
 
+        // BUG FIX #7 (see matching comment near Stage B above): don't let a
+        // stale in-flight call clobber fresher local state on completion.
+        if (cancelled) {
+          return
+        }
+
         if (!writeResult.ok) {
           // Ignore version conflicts - someone else finalized it
+        } else {
+          // BUG FIX #6: update local state immediately instead of relying
+          // solely on Realtime/poll to echo this client's own write back.
+          // Without this, room.version stayed stale locally after a
+          // successful write, so the *next* reconcile pass (the phase
+          // transition below) would send a now-outdated expectedVersion
+          // and always lose the version-guard race - silently doing
+          // nothing until an external Realtime/poll refresh happened to
+          // land at just the right moment. That made the round-summary
+          // popup appearance sporadic/flaky instead of reliable.
+          publicState = updates as PublicState
+          version += 1
+          roomData = {
+            ...roomData,
+            public_state: publicState,
+            version,
+          }
+
+          updateRoom({
+            publicState,
+            roomData,
+            version,
+          })
         }
 
         // Return early; we'll run the phase transition check next reconcile pass
@@ -639,8 +680,28 @@ export function useMultiplayerGameState(): {
           return { affectedRows: result.status === 204 ? 1 : 0 }
         }, version)
 
+        // BUG FIX #7 (see matching comment near Stage B above).
+        if (cancelled) {
+          return
+        }
+
         if (!writeResult.ok) {
           // Ignore version conflicts - someone else transitioned it
+        } else {
+          // BUG FIX #6 (see matching comment above)
+          publicState = updates as PublicState
+          version += 1
+          roomData = {
+            ...roomData,
+            public_state: publicState,
+            version,
+          }
+
+          updateRoom({
+            publicState,
+            roomData,
+            version,
+          })
         }
 
         return
@@ -694,6 +755,11 @@ export function useMultiplayerGameState(): {
 
           return { affectedRows: result.status === 204 ? 1 : 0 }
         }, version)
+
+        // BUG FIX #7 (see matching comment near Stage B above).
+        if (cancelled) {
+          return
+        }
 
         if (!writeResult.ok) {
           console.error('Error publishing shared conclusion:', writeResult)
