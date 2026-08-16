@@ -452,9 +452,14 @@ export function useMultiplayerGameState(): {
           )
 
           if (victoriousDuels.length > 0) {
-            const capturedCards = victoriousDuels.map((entry) =>
-              isAttacker ? entry.duel.defenderCard : entry.duel.attackerCard,
-            )
+            // BUG FIX #5: rest BOTH the winner's own fighting card and the
+            // captured enemy card - matching single-player's processRoundEnd
+            // (attackerWonCards/defenderWonCards include duel.attackerCard
+            // AND duel.defenderCard). This previously only rested the
+            // captured card, so the winner's own card - already removed
+            // from `available` when queued for combat - vanished entirely
+            // instead of resting, shrinking both armies every round.
+            const capturedCards = victoriousDuels.flatMap((entry) => [entry.duel.attackerCard, entry.duel.defenderCard])
             army = addWinnersToRest(army, capturedCards, 2) // TODO: get restRounds from config
           }
         }

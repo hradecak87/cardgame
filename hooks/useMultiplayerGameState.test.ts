@@ -362,6 +362,56 @@ describe('useMultiplayerGameState combat reveals', () => {
       })
     })
 
+    it('sends both the winner\'s own fighting card and the captured enemy card to rest, not just the captured card', async () => {
+      // Regression test: per game rules ("hráč si všechny vyhrané vojáky
+      // včetně svých po boji dá do odpočívárny" - the winner rests ALL
+      // winning soldiers, including their own), a winning duel should send
+      // BOTH the winner's own card and the captured enemy card to that
+      // player's rest area for 2 rounds - matching single-player's
+      // processRoundEnd (attackerWonCards/defenderWonCards include both
+      // duel.attackerCard and duel.defenderCard). The multiplayer
+      // reconciliation only ever rested the *captured* card, silently
+      // dropping the winner's own fighting card entirely (it was already
+      // removed from `available` when queued for combat, and never added
+      // back to either `available` or `resting`) - shrinking both
+      // players' troop counts every round beyond fair losses and
+      // eventually running the whole army out of cards.
+      const ownWinningCard = createCard('attacker-1', 8)
+      const capturedCard = createCard('defender-1', 3)
+      const roomData = createRoomRow({
+        attacker_side: 'a',
+        public_state: createPublicState({
+          phase: 'round-summary',
+          roundSummaryDismissedBy: { a: true, b: true },
+          combat: {
+            attackerSlotsTotal: 1,
+            attackerCardsRevealed: [ownWinningCard],
+            revealedCard: null,
+            defenderCommitted: true,
+            pendingTies: [],
+            resolvedDuels: [{ duel: { attackerCard: ownWinningCard, defenderCard: capturedCard }, winner: 'attacker' }],
+          },
+        }),
+      })
+      const handData = createHandRow({
+        player_uid: 'uid-a',
+        available: [],
+        pending_attack_queue: [ownWinningCard],
+        last_applied_round: 0,
+      })
+
+      const { roomUpdates } = await mountHookWithRoom(roomData, handData)
+
+      await waitFor(() => {
+        expect(roomUpdates.length).toBeGreaterThan(0)
+      })
+
+      const restingIds = (roomUpdates[0]?.public_state as PublicState)?.playerA.resting.map((entry) => entry.card.id)
+
+      expect(restingIds).toEqual(expect.arrayContaining(['attacker-1', 'defender-1']))
+      expect(restingIds).toHaveLength(2)
+    })
+
     it('lets the current attacker publish the shared conclusion in the same pass when becoming the second finisher', async () => {
       const roomData = createRoomRow({
         attacker_side: 'a',
